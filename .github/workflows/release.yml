@@ -2,8 +2,15 @@ name: Remmi Browser - Release CI/CD
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
     inputs:
       create_release:
