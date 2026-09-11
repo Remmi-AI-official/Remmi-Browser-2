@@ -12,11 +12,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Agar zip repo me hi maujood hai
-      - name: Extract zip to workspace root
+      - name: Auto-detect and extract zip file
         run: |
-          unzip -o "my-file.zip" -d .
+          # Workspace me kisi bhi .zip file ko search karega
+          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
 
-      # Check karne ke liye ki files root me aayi ya nahi
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Error: Repository me koi bhi .zip file nahi mili!"
+            echo "Current files in repo:"
+            ls -la
+            exit 1
+          fi
+
+          echo "Extracting $ZIP_FILE to root..."
+          unzip -o "$ZIP_FILE" -d .
+
       - name: Verify extracted files
         run: ls -la
