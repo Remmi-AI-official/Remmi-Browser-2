@@ -1,0 +1,22 @@
+name: Extract Zip to Root
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  unzip-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Agar zip repo me hi maujood hai
+      - name: Extract zip to workspace root
+        run: |
+          unzip -o "my-file.zip" -d .
+
+      # Check karne ke liye ki files root me aayi ya nahi
+      - name: Verify extracted files
+        run: ls -la
