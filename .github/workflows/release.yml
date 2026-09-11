@@ -67,18 +67,7 @@ jobs:
           fi
 
           echo "Decoding project release keystore from GitHub Secrets..."
-          python3 -c "
-import os, base64, re
-raw = os.environ.get('KEYSTORE_BASE64', '')
-# Keep only valid base64 chars
-cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw)
-# Fix padding if needed
-missing_padding = len(cleaned) % 4
-if missing_padding:
-    cleaned += '=' * (4 - missing_padding)
-with open('release-keystore.jks', 'wb') as f:
-    f.write(base64.b64decode(cleaned))
-"
+          python3 -c "import os, base64, re; raw = os.environ.get('KEYSTORE_BASE64', ''); cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw); cleaned += '=' * ((4 - len(cleaned) % 4) % 4); open('release-keystore.jks', 'wb').write(base64.b64decode(cleaned))"
           test -s release-keystore.jks
           keytool -list -keystore release-keystore.jks -storepass "$STORE_PASSWORD" > /dev/null || {
             echo "::error::Keystore is invalid or corrupt. Check your GitHub Secret value!" >&2
