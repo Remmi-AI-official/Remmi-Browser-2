@@ -48,18 +48,16 @@ jobs:
       - name: Prepare Signing Keystore
         id: setup_keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.REMMI_RELEASE_KEYSTORE_B64 }}
-          STORE_PASSWORD: ${{ secrets.REMMI_RELEASE_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.REMMI_RELEASE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.REMMI_RELEASE_KEY_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.REMMI_RELEASE_KEYSTORE_B64 || secrets.KEYSTORE_BASE64 || secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.REMMI_RELEASE_STORE_PASSWORD || secrets.STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD || 'android' }}
+          KEY_ALIAS: ${{ secrets.REMMI_RELEASE_KEY_ALIAS || secrets.KEY_ALIAS || secrets.RELEASE_KEY_ALIAS || 'vaultkey' }}
+          KEY_PASSWORD: ${{ secrets.REMMI_RELEASE_KEY_PASSWORD || secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD || 'android' }}
         run: |
           set -euo pipefail
-          for required in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [ -z "${!required:-}" ]; then
-              echo "Missing required release signing secret: $required" >&2
-              exit 1
-            fi
-          done
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::Missing release keystore Base64 secret! Please set REMMI_RELEASE_KEYSTORE_B64 (or KEYSTORE_BASE64) in GitHub Secrets." >&2
+            exit 1
+          fi
 
           echo "Decoding project release keystore from GitHub Secrets..."
           echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > release-keystore.jks
