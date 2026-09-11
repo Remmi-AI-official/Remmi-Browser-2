@@ -62,17 +62,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          KEYSTORE_FILE="release-keystore.jks"
+          KEYSTORE_FILE="${{ github.workspace }}/release-keystore.jks"
           SUCCESS=0
 
           # Option 1: Try decoding KEYSTORE_BASE64 secret if provided
           if [ -n "${KEYSTORE_BASE64:-}" ]; then
             echo "Decoding project release keystore from GitHub Secrets..."
+            rm -f "$KEYSTORE_FILE"
             python3 -c "import os, base64, re; raw = os.environ.get('KEYSTORE_BASE64', ''); cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw); cleaned += '=' * ((4 - len(cleaned) % 4) % 4); open('$KEYSTORE_FILE', 'wb').write(base64.b64decode(cleaned))" 2>/dev/null || true
             
-            # Check with candidate passwords
             for sp in "${STORE_PASSWORD:-}" "android"; do
-              if [ -n "$sp" ] && keytool -list -keystore "$KEYSTORE_FILE" -storepass "$sp" > /dev/null 2>&1; then
+              if [ -n "$sp" ] && [ -s "$KEYSTORE_FILE" ] && keytool -list -keystore "$KEYSTORE_FILE" -storepass "$sp" > /dev/null 2>&1; then
                 echo "Successfully unlocked keystore from GitHub Secrets."
                 STORE_PASSWORD="$sp"
                 KEY_PASSWORD="${KEY_PASSWORD:-$sp}"
@@ -83,25 +83,40 @@ jobs:
             done
           fi
 
-          # Option 2: Fallback to existing release-keystore.jks in repo if present
-          if [ "$SUCCESS" -eq 0 ] && [ -f "${{ github.workspace }}/release-keystore.jks" ]; then
-            echo "Using committed release-keystore.jks..."
-            KEYSTORE_FILE="release-keystore.jks"
-            for sp in "${STORE_PASSWORD:-}" "android"; do
-              if [ -n "$sp" ] && keytool -list -keystore "$KEYSTORE_FILE" -storepass "$sp" > /dev/null 2>&1; then
-                echo "Successfully validated committed release-keystore.jks"
-                STORE_PASSWORD="$sp"
-                KEY_PASSWORD="${KEY_PASSWORD:-$sp}"
-                KEY_ALIAS="${KEY_ALIAS:-vaultkey}"
-                SUCCESS=1
-                break
-              fi
-            done
+          # Option 2: Try committed release-keystore.base64 or release-keystore.jks
+          if [ "$SUCCESS" -eq 0 ]; then
+            if [ -f "${{ github.workspace }}/release-keystore.base64" ]; then
+              echo "Decoding from committed release-keystore.base64..."
+              rm -f "$KEYSTORE_FILE"
+              cat "${{ github.workspace }}/release-keystore.base64" | tr -d '\r\n ' | base64 -d > "$KEYSTORE_FILE"
+              for sp in "${STORE_PASSWORD:-}" "android"; do
+                if [ -n "$sp" ] && [ -s "$KEYSTORE_FILE" ] && keytool -list -keystore "$KEYSTORE_FILE" -storepass "$sp" > /dev/null 2>&1; then
+                  echo "Successfully validated release-keystore.base64."
+                  STORE_PASSWORD="$sp"
+                  KEY_PASSWORD="${KEY_PASSWORD:-$sp}"
+                  KEY_ALIAS="${KEY_ALIAS:-vaultkey}"
+                  SUCCESS=1
+                  break
+                fi
+              done
+            elif [ -f "${{ github.workspace }}/release-keystore.jks" ]; then
+              for sp in "${STORE_PASSWORD:-}" "android"; do
+                if [ -n "$sp" ] && keytool -list -keystore "${{ github.workspace }}/release-keystore.jks" -storepass "$sp" > /dev/null 2>&1; then
+                  echo "Successfully validated committed release-keystore.jks"
+                  STORE_PASSWORD="$sp"
+                  KEY_PASSWORD="${KEY_PASSWORD:-$sp}"
+                  KEY_ALIAS="${KEY_ALIAS:-vaultkey}"
+                  SUCCESS=1
+                  break
+                fi
+              done
+            fi
           fi
 
-          # Option 3: Fallback to debug.keystore.base64 if present, or generate a valid signing keystore on the fly
+          # Option 3: Fallback to debug.keystore.base64 if present, or generate a fresh valid signing keystore
           if [ "$SUCCESS" -eq 0 ]; then
             echo "Falling back to generating / decoding safe CI signing keystore..."
+            rm -f "$KEYSTORE_FILE"
             if [ -f "${{ github.workspace }}/debug.keystore.base64" ]; then
               cat "${{ github.workspace }}/debug.keystore.base64" | tr -d '\r\n ' | base64 -d > "$KEYSTORE_FILE"
               STORE_PASSWORD="android"
@@ -122,7 +137,7 @@ jobs:
             fi
           fi
 
-          echo "KEYSTORE_PATH=${{ github.workspace }}/$KEYSTORE_FILE" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
           echo "STORE_PASSWORD=${STORE_PASSWORD}" >> "$GITHUB_ENV"
           echo "KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
           echo "KEY_PASSWORD=${KEY_PASSWORD}" >> "$GITHUB_ENV"
