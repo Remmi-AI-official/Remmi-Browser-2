@@ -99,14 +99,27 @@ jobs:
             done
           fi
 
-          # Option 3: Fallback to debug.keystore so builds NEVER block
+          # Option 3: Fallback to debug.keystore.base64 if present, or generate a valid signing keystore on the fly
           if [ "$SUCCESS" -eq 0 ]; then
-            echo "Falling back to repository debug keystore for CI signing..."
-            cp "${{ github.workspace }}/debug.keystore" "$KEYSTORE_FILE"
-            STORE_PASSWORD="android"
-            KEY_PASSWORD="android"
-            KEY_ALIAS="androiddebugkey"
-            SUCCESS=1
+            echo "Falling back to generating / decoding safe CI signing keystore..."
+            if [ -f "${{ github.workspace }}/debug.keystore.base64" ]; then
+              cat "${{ github.workspace }}/debug.keystore.base64" | tr -d '\r\n ' | base64 -d > "$KEYSTORE_FILE"
+              STORE_PASSWORD="android"
+              KEY_PASSWORD="android"
+              KEY_ALIAS="androiddebugkey"
+              SUCCESS=1
+            else
+              keytool -genkeypair -v \
+                -keystore "$KEYSTORE_FILE" \
+                -alias "vaultkey" \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -storepass "android" -keypass "android" \
+                -dname "CN=Remmi CI, OU=Build, O=Remmi, C=US"
+              STORE_PASSWORD="android"
+              KEY_PASSWORD="android"
+              KEY_ALIAS="vaultkey"
+              SUCCESS=1
+            fi
           fi
 
           echo "KEYSTORE_PATH=${{ github.workspace }}/$KEYSTORE_FILE" >> "$GITHUB_ENV"
