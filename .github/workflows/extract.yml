@@ -1,11 +1,10 @@
-name: Extract Zip and Push to Main
+name: Extract Zip Contents Directly to Root
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
-# GitHub repo me push karne ke liye write permission zaroori hai
 permissions:
   contents: write
 
@@ -16,20 +15,48 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Auto-detect and extract zip file
+      - name: Extract zip contents directly to root
         run: |
+          # 1. Zip file dhoondo
           ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "Error: Repository me koi bhi .zip file nahi mili!"
+            echo "Error: Koi .zip file nahi mili!"
             exit 1
           fi
 
-          echo "Extracting $ZIP_FILE to root..."
-          unzip -o "$ZIP_FILE" -d .
+          echo "Found zip file: $ZIP_FILE"
 
-          # Agar extract karne ke baad original zip delete karni hai, toh neeche wali line uncomment karein:
-          # rm "$ZIP_FILE"
+          # 2. Ek temporary folder me extract karo
+          mkdir -p _temp_extract
+          unzip -o "$ZIP_FILE" -d _temp_extract
+
+          # 3. Check karo agar andar single subfolder bana hai (jaise 'a')
+          DIR_COUNT=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d | wc -l)
+          TOTAL_COUNT=$(find _temp_extract -mindepth 1 -maxdepth 1 | wc -l)
+
+          # Dot files (hidden files) ko bhi include karne ke liye
+          shopt -s dotglob
+
+          if [ "$DIR_COUNT" -eq 1 ] && [ "$TOTAL_COUNT" -eq 1 ]; then
+            # Agar andar sirf ek hi folder hai, toh uske andar ka maal root me le aao
+            INNER_DIR=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d)
+            echo "Subfolder detected: $INNER_DIR. Moving its contents to root..."
+            cp -rf "$INNER_DIR"/* .
+          else
+            # Agar zip me direct files hain, toh seedhe root me daal do
+            echo "Moving all extracted files to root..."
+            cp -rf _temp_extract/* .
+          fi
+
+          # 4. Cleanup: Temp folder delete karo
+          rm -rf _temp_extract
+
+          # (Optional) Agar extract hone ke baad original zip file delete karni hai:
+          rm "$ZIP_FILE"
+
+      - name: Verify root files
+        run: ls -la
 
       - name: Commit and Push changes to main
         run: |
@@ -38,11 +65,9 @@ jobs:
 
           git add .
 
-          # Check karega ki sachme naye files aaye hain ya nahi
           if git diff --staged --quiet; then
             echo "Koi naya badlaav nahi mila commit karne ke liye."
           else
-            # [skip ci] lagaya hai taaki commit push hone par dubara loop na ban jaye
-            git commit -m "Auto-extracted zip contents to root [skip ci]"
+            git commit -m "Extracted zip contents directly to root [skip ci]"
             git push
           fi
