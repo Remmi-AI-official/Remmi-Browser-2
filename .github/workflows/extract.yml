@@ -5,14 +5,15 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   unzip-and-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Extract zip contents directly to root
         run: |
@@ -27,8 +28,12 @@ jobs:
           unzip -o "$ZIP_FILE" -d _temp_extract
 
           INNER_DIR=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          
+          # GitHub block na kare isliye zip ke andar ke workflows ko exclude karein
+          rm -rf "$INNER_DIR/.github"
 
           shopt -s dotglob
+          echo "Moving contents to root..."
           cp -rf "$INNER_DIR"/* .
 
           rm -rf _temp_extract
@@ -44,6 +49,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "Koi naya badlaav nahi mila."
           else
-            git commit -m "Extracted zip contents directly to root [skip ci]"
+            git commit -m "Extracted project to root [skip ci]"
             git push
           fi
