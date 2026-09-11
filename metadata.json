@@ -2,5 +2,5 @@
   "name": "Remmi Browser",
   "description": "Remmi Browser - Fast, secure, cyberpunk Android privacy browser with Tor routing, anti-fingerprinting, adblocking, and password vault.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

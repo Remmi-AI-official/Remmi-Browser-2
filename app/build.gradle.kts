@@ -27,6 +27,12 @@ android {
   }
 
   signingConfigs {
+    create("debugConfig") {
+      storeFile = file("${rootDir}/debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH")
       val storePassword = System.getenv("STORE_PASSWORD")
@@ -50,6 +56,9 @@ android {
   }
 
   buildTypes {
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+    }
     release {
       isCrunchPngs = false
       isMinifyEnabled = true
@@ -62,7 +71,7 @@ android {
   val isBuildingBundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
   splits {
     abi {
-      isEnable = !isBuildingBundle
+      isEnable = false
       reset()
       include("arm64-v8a", "armeabi-v7a", "x86_64")
       isUniversalApk = true
