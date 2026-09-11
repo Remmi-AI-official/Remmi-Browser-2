@@ -1,12 +1,16 @@
-name: Extract Zip to Root
+name: Extract Zip and Push to Main
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
+# GitHub repo me push karne ke liye write permission zaroori hai
+permissions:
+  contents: write
+
 jobs:
-  unzip-job:
+  unzip-and-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -14,18 +18,31 @@ jobs:
 
       - name: Auto-detect and extract zip file
         run: |
-          # Workspace me kisi bhi .zip file ko search karega
           ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
             echo "Error: Repository me koi bhi .zip file nahi mili!"
-            echo "Current files in repo:"
-            ls -la
             exit 1
           fi
 
           echo "Extracting $ZIP_FILE to root..."
           unzip -o "$ZIP_FILE" -d .
 
-      - name: Verify extracted files
-        run: ls -la
+          # Agar extract karne ke baad original zip delete karni hai, toh neeche wali line uncomment karein:
+          # rm "$ZIP_FILE"
+
+      - name: Commit and Push changes to main
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .
+
+          # Check karega ki sachme naye files aaye hain ya nahi
+          if git diff --staged --quiet; then
+            echo "Koi naya badlaav nahi mila commit karne ke liye."
+          else
+            # [skip ci] lagaya hai taaki commit push hone par dubara loop na ban jaye
+            git commit -m "Auto-extracted zip contents to root [skip ci]"
+            git push
+          fi
