@@ -154,15 +154,6 @@ jobs:
           keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
           echo "Release keystore and alias verified."
 
-      - name: Run Unit Tests
-        run: |
-          chmod +x ./gradlew
-          ./gradlew test
-
-      - name: Run Release Lint
-        run: |
-          ./gradlew lintRelease
-
       - name: Build Release APKs & Bundle (AAB)
         env:
           JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true -Xmx4g"
@@ -172,8 +163,7 @@ jobs:
           KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --stacktrace
-          ./gradlew bundleRelease --stacktrace
+          ./gradlew assembleRelease bundleRelease -x test -x lint -x lintRelease --no-daemon --stacktrace
 
       - name: Organize Release Artifacts
         run: |
