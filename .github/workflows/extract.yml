@@ -5,16 +5,14 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  workflows: write   # .github/workflows files ko push karne ke liye zaroori hai
-
 jobs:
   unzip-and-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Extract zip contents directly to root
         run: |
@@ -25,30 +23,16 @@ jobs:
             exit 1
           fi
 
-          echo "Found zip file: $ZIP_FILE"
-
           mkdir -p _temp_extract
           unzip -o "$ZIP_FILE" -d _temp_extract
 
-          DIR_COUNT=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d | wc -l)
-          TOTAL_COUNT=$(find _temp_extract -mindepth 1 -maxdepth 1 | wc -l)
+          INNER_DIR=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
           shopt -s dotglob
-
-          if [ "$DIR_COUNT" -eq 1 ] && [ "$TOTAL_COUNT" -eq 1 ]; then
-            INNER_DIR=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d)
-            echo "Subfolder detected: $INNER_DIR. Moving its contents to root..."
-            cp -rf "$INNER_DIR"/* .
-          else
-            echo "Moving all extracted files to root..."
-            cp -rf _temp_extract/* .
-          fi
+          cp -rf "$INNER_DIR"/* .
 
           rm -rf _temp_extract
           rm "$ZIP_FILE"
-
-      - name: Verify root files
-        run: ls -la
 
       - name: Commit and Push changes to main
         run: |
@@ -58,7 +42,7 @@ jobs:
           git add .
 
           if git diff --staged --quiet; then
-            echo "Koi naya badlaav nahi mila commit karne ke liye."
+            echo "Koi naya badlaav nahi mila."
           else
             git commit -m "Extracted zip contents directly to root [skip ci]"
             git push
