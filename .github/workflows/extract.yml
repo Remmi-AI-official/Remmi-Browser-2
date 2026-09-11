@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write   # .github/workflows files ko push karne ke liye zaroori hai
 
 jobs:
   unzip-and-push:
@@ -17,7 +18,6 @@ jobs:
 
       - name: Extract zip contents directly to root
         run: |
-          # 1. Zip file dhoondo
           ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
@@ -27,32 +27,24 @@ jobs:
 
           echo "Found zip file: $ZIP_FILE"
 
-          # 2. Ek temporary folder me extract karo
           mkdir -p _temp_extract
           unzip -o "$ZIP_FILE" -d _temp_extract
 
-          # 3. Check karo agar andar single subfolder bana hai (jaise 'a')
           DIR_COUNT=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d | wc -l)
           TOTAL_COUNT=$(find _temp_extract -mindepth 1 -maxdepth 1 | wc -l)
 
-          # Dot files (hidden files) ko bhi include karne ke liye
           shopt -s dotglob
 
           if [ "$DIR_COUNT" -eq 1 ] && [ "$TOTAL_COUNT" -eq 1 ]; then
-            # Agar andar sirf ek hi folder hai, toh uske andar ka maal root me le aao
             INNER_DIR=$(find _temp_extract -mindepth 1 -maxdepth 1 -type d)
             echo "Subfolder detected: $INNER_DIR. Moving its contents to root..."
             cp -rf "$INNER_DIR"/* .
           else
-            # Agar zip me direct files hain, toh seedhe root me daal do
             echo "Moving all extracted files to root..."
             cp -rf _temp_extract/* .
           fi
 
-          # 4. Cleanup: Temp folder delete karo
           rm -rf _temp_extract
-
-          # (Optional) Agar extract hone ke baad original zip file delete karni hai:
           rm "$ZIP_FILE"
 
       - name: Verify root files
