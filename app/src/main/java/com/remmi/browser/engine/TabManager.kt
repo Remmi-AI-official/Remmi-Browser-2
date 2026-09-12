@@ -214,13 +214,48 @@ class TabManager {
     updateTab(tabId) { it.copy(containerType = containerType) }
   }
 
+  // Tracks explicit user/UI intent to display Home/New Tab screen.
+  // Transient renderer events (like Gecko's internal about:blank during attachment or recovery)
+  // must never mutate a real tab URL unless explicit home intent has been set.
+  private val explicitHomeIntentByTab = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+  fun setExplicitHomeIntent(tabId: String, requested: Boolean) {
+    explicitHomeIntentByTab[tabId] = requested
+  }
+
+  fun hasExplicitHomeIntent(tabId: String): Boolean {
+    return explicitHomeIntentByTab[tabId] ?: false
+  }
+
+  fun clearExplicitHomeIntent(tabId: String) {
+    explicitHomeIntentByTab.remove(tabId)
+  }
+
   fun updateTab(tabId: String, update: (BrowserTab) -> BrowserTab) {
     tabUpdateCounter.incrementAndGet()
     var changed = false
     val currentTabs = _tabs.value
     val updatedTabs = currentTabs.map { tab ->
       if (tab.id == tabId) {
-        val updated = update(tab)
+        var updated = update(tab)
+
+        // INVARIANT: A transient Gecko about:blank event MUST NOT erase a previously successful active URL.
+        // If the updated tab is trying to set an about:blank / empty URL, but the tab previously had
+        // a real web URL and explicit home intent was NOT registered, reject erasing the active URL.
+        val isBlankTarget = updated.url.isBlank() || updated.url == "about:blank" || updated.url == "remmi://newtab" || updated.url == "about:home"
+        val hadRealUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
+        if (isBlankTarget && hadRealUrl && !hasExplicitHomeIntent(tabId)) {
+          val caller = try {
+            Thread.currentThread().stackTrace.drop(2).take(4)
+              .joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+          } catch (_: Exception) { "unknown" }
+          val msg = "[FORENSIC][TAB_URL_WRITE_REJECTED] tabId=$tabId attemptedBlankUrl=${updated.url} preservedRealUrl=${tab.url} caller=$caller"
+          Log.w(TAG, msg)
+          DebugLogManager.log(msg)
+          // Preserve the real URL and title, but allow other safe status updates
+          updated = updated.copy(url = tab.url, title = tab.title)
+        }
+
         if (updated != tab) {
           changed = true
           if (updated.url != tab.url) {
