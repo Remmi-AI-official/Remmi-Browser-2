@@ -81,9 +81,21 @@ def main():
     with open(keystore_file, 'wb') as f:
         f.write(decoded_bytes)
 
-    # Step 1: Verify store password
+    file_size = len(decoded_bytes)
+    header_hex = decoded_bytes[:8].hex() if file_size >= 8 else ''
+    print(f"Decoded keystore file: {keystore_file} ({file_size} bytes, header hex: {header_hex})")
+
+    # Step 1: Verify store password across formats (Auto, PKCS12, JKS)
     res = run_keytool(['-list', '-keystore', keystore_file, '-storepass', store_pass])
     
+    # Try explicit storetypes if default fails
+    if res.returncode != 0:
+        for st in ['PKCS12', 'JKS']:
+            res_st = run_keytool(['-list', '-keystore', keystore_file, '-storepass', store_pass, '-storetype', st])
+            if res_st.returncode == 0:
+                res = res_st
+                break
+
     # Check if store_pass and key_pass might have been swapped
     if res.returncode != 0 and key_pass and key_pass != store_pass:
         res_swapped = run_keytool(['-list', '-keystore', keystore_file, '-storepass', key_pass])
@@ -96,6 +108,14 @@ def main():
         err_msg = (res.stderr or res.stdout).strip()
         print("::error::CRITICAL RELEASE FAILURE: Failed to unlock release keystore with STORE_PASSWORD.")
         print(f"::error::Keytool error details: {err_msg}")
+        if "EOFException" in err_msg or "Invalid keystore format" in err_msg:
+            print("::error::[DIAGNOSIS]: The keystore secret (REMMI_RELEASE_KEYSTORE_B64) is corrupted or truncated.")
+            print("::error::This usually happens when raw binary bytes were pasted into GitHub Secrets instead of a single-line Base64 string, or when the Base64 string was truncated.")
+            print("::notice::[HOW TO FIX]: Run one of the following commands locally to re-generate the secret value:")
+            print("::notice::  - Linux: base64 -w 0 <your-keystore-file.jks>")
+            print("::notice::  - macOS: base64 -i <your-keystore-file.jks>")
+            print("::notice::  - Windows (PowerShell): [Convert]::ToBase64String([IO.File]::ReadAllBytes('your-keystore-file.jks')) | Set-Clipboard")
+            print("::notice::Copy the output and paste it into GitHub Repository Secrets -> REMMI_RELEASE_KEYSTORE_B64.")
         sys.exit(1)
 
     # Step 2: Parse available aliases from keystore
