@@ -85,6 +85,16 @@ def main():
     header_hex = decoded_bytes[:8].hex() if file_size >= 8 else ''
     print(f"Decoded keystore file: {keystore_file} ({file_size} bytes, header hex: {header_hex})")
 
+    # Check ASN.1 DER length for PKCS#12 (.p12 / .jks)
+    der_expected_len = None
+    if file_size >= 4 and decoded_bytes[0] == 0x30 and decoded_bytes[1] == 0x82:
+        der_expected_len = (decoded_bytes[2] << 8 | decoded_bytes[3]) + 4
+        if file_size < der_expected_len:
+            missing = der_expected_len - file_size
+            print(f"::error::[CRITICAL CORRUPTION]: Keystore is truncated by exactly {missing} byte(s).")
+            print(f"::error::Expected {der_expected_len} bytes per PKCS#12 ASN.1 header, but decoded only {file_size} bytes.")
+            print(f"::error::The Base64 string in REMMI_RELEASE_KEYSTORE_B64 is missing its trailing character(s).")
+
     # Step 1: Verify store password across formats (Auto, PKCS12, JKS)
     res = run_keytool(['-list', '-keystore', keystore_file, '-storepass', store_pass])
     
