@@ -669,8 +669,14 @@ class AdblockBridge {
     val pid = android.os.Process.myPid()
     val callerThread = Thread.currentThread()
 
-    val callerTrace = android.util.Log.getStackTraceString(Exception("Caller Trace"))
-    Log.i(TAG, "[COMPILE_REQUEST] source=$source generation=$currentGen jobId=$jobId sessionId=$sess processPid=$pid callerTrace=\n$callerTrace")
+    val callerTrace = if (com.remmi.browser.BuildConfig.DEBUG) {
+      android.util.Log.getStackTraceString(Exception("Caller Trace"))
+    } else {
+      "release"
+    }
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      Log.d(TAG, "[COMPILE_REQUEST] source=$source generation=$currentGen jobId=$jobId sessionId=$sess processPid=$pid callerTrace=\n$callerTrace")
+    }
 
     if (android.os.Looper.myLooper() != null && android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
       Log.w(TAG, "[COMPILE_UI_THREAD] compileRules called on Main Looper Thread!")

@@ -13,6 +13,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 import com.remmi.browser.storage.SessionTabEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+
+data class TabTrackerStats(
+  val blockedTrackersCount: Int = 0,
+  val adsBlockedCount: Int = 0,
+  val analyticsBlockedCount: Int = 0,
+  val socialBlockedCount: Int = 0,
+  val cryptomineBlockedCount: Int = 0,
+  val fingerprintBlockedCount: Int = 0,
+  val blockedLog: List<String> = emptyList(),
+  val isDirty: Boolean = false,
+  val lastUpdated: Long = System.currentTimeMillis()
+)
 
 class TabManager {
 
@@ -28,6 +47,41 @@ class TabManager {
     )
   )
   val tabs: StateFlow<List<BrowserTab>> = _tabs.asStateFlow()
+
+  private val trackerStatsMap = ConcurrentHashMap<String, TabTrackerStats>()
+  private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+  @Volatile
+  var isAutoFlushEnabled: Boolean = true
+
+  init {
+    startTrackerFlushLoop()
+  }
+
+  private fun startTrackerFlushLoop() {
+    scope.launch {
+      while (isActive) {
+        delay(1500L)
+        if (isAutoFlushEnabled) {
+          try {
+            flushPendingTrackerStats()
+          } catch (_: Exception) {}
+        }
+      }
+    }
+  }
+
+  private fun applyTrackerStats(tab: BrowserTab): BrowserTab {
+    val stats = trackerStatsMap[tab.id] ?: return tab
+    return tab.copy(
+      blockedTrackersCount = stats.blockedTrackersCount,
+      adsBlockedCount = stats.adsBlockedCount,
+      analyticsBlockedCount = stats.analyticsBlockedCount,
+      socialBlockedCount = stats.socialBlockedCount,
+      cryptomineBlockedCount = stats.cryptomineBlockedCount,
+      fingerprintBlockedCount = stats.fingerprintBlockedCount,
+      blockedLog = stats.blockedLog
+    )
+  }
 
   // Forensic Churn Rate Trackers
   val trackerEventCounter = java.util.concurrent.atomic.AtomicInteger(0)
@@ -66,11 +120,13 @@ class TabManager {
     get() {
       val currentTabs = _tabs.value
       val index = _activeTabIndex.value
-      return if (index in currentTabs.indices) currentTabs[index] else null
+      val tab = if (index in currentTabs.indices) currentTabs[index] else null
+      return tab?.let { applyTrackerStats(it) }
     }
 
   fun getTab(tabId: String): BrowserTab? {
-    return _tabs.value.find { it.id == tabId }
+    val tab = _tabs.value.find { it.id == tabId }
+    return tab?.let { applyTrackerStats(it) }
   }
 
   fun createTab(
@@ -220,16 +276,24 @@ class TabManager {
     val currentTabs = _tabs.value
     val updatedTabs = currentTabs.map { tab ->
       if (tab.id == tabId) {
-        val updated = update(tab)
+        val withStats = applyTrackerStats(tab)
+        val updated = update(withStats)
         if (updated != tab) {
           changed = true
+          trackerStatsMap.computeIfPresent(tabId) { _, s -> s.copy(isDirty = false) }
           if (updated.url != tab.url) {
-            val caller = try {
-              Thread.currentThread().stackTrace.drop(2).take(4)
-                .joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
-            } catch (_: Exception) { "unknown" }
+            val caller = if (com.remmi.browser.BuildConfig.DEBUG) {
+              try {
+                Thread.currentThread().stackTrace.drop(2).take(4)
+                  .joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+              } catch (_: Exception) { "unknown" }
+            } else {
+              "updateTab"
+            }
             val msg = "[FORENSIC][TAB_URL_WRITE] tabId=$tabId oldUrl=${tab.url} newUrl=${updated.url} caller=$caller"
-            Log.i(TAG, msg)
+            if (com.remmi.browser.BuildConfig.DEBUG) {
+              Log.d(TAG, msg)
+            }
             DebugLogManager.log(msg)
           }
         }
@@ -246,6 +310,42 @@ class TabManager {
       stateEmissionCounter.incrementAndGet()
     }
     checkAndEmitTabStateRate(tabId)
+  }
+
+  fun flushPendingTrackerStats(targetTabId: String? = null) {
+    val hasDirty = if (targetTabId != null) {
+      trackerStatsMap[targetTabId]?.isDirty == true
+    } else {
+      trackerStatsMap.values.any { it.isDirty }
+    }
+    if (!hasDirty) return
+
+    val currentTabs = _tabs.value
+    var changed = false
+    val updatedTabs = currentTabs.map { tab ->
+      val stats = trackerStatsMap[tab.id]
+      if (stats != null && stats.isDirty && (targetTabId == null || tab.id == targetTabId)) {
+        changed = true
+        trackerStatsMap.computeIfPresent(tab.id) { _, s -> s.copy(isDirty = false) }
+        tab.copy(
+          blockedTrackersCount = stats.blockedTrackersCount,
+          adsBlockedCount = stats.adsBlockedCount,
+          analyticsBlockedCount = stats.analyticsBlockedCount,
+          socialBlockedCount = stats.socialBlockedCount,
+          cryptomineBlockedCount = stats.cryptomineBlockedCount,
+          fingerprintBlockedCount = stats.fingerprintBlockedCount,
+          blockedLog = stats.blockedLog
+        )
+      } else {
+        tab
+      }
+    }
+
+    if (changed && updatedTabs != currentTabs) {
+      _tabs.value = updatedTabs
+      stateEmissionCounter.incrementAndGet()
+      checkAndEmitTabStateRate(targetTabId)
+    }
   }
 
   fun incrementInTabNavigation(tabId: String) {
@@ -315,6 +415,7 @@ class TabManager {
     val closeMsg = "[FORENSIC][TAB_CLOSE] closedTabId=$tabId parentTabId=$parentId selectedTabIdBefore=$beforeTabId selectedTabIdAfter=$afterTabId tabCountBefore=$sizeBefore tabCountAfter=$sizeAfter"
     Log.i(TAG, closeMsg)
     DebugLogManager.log(closeMsg)
+    trackerStatsMap.remove(tabId)
     com.remmi.browser.engine.chain.NavigationChainTracker.clearTab(tabId)
   }
 
@@ -489,38 +590,70 @@ class TabManager {
     } catch (_: Exception) {
       blockedDomain
     }
-    updateTab(tabId) { tab ->
-      val newLog = if (tab.blockedLog.size >= 100) tab.blockedLog.drop(1) + displayHost else tab.blockedLog + displayHost
+
+    trackerStatsMap.compute(tabId) { _, existing ->
+      val base = existing ?: run {
+        val tab = _tabs.value.find { it.id == tabId }
+        if (tab != null) {
+          TabTrackerStats(
+            blockedTrackersCount = tab.blockedTrackersCount,
+            adsBlockedCount = tab.adsBlockedCount,
+            analyticsBlockedCount = tab.analyticsBlockedCount,
+            socialBlockedCount = tab.socialBlockedCount,
+            cryptomineBlockedCount = tab.cryptomineBlockedCount,
+            fingerprintBlockedCount = tab.fingerprintBlockedCount,
+            blockedLog = tab.blockedLog,
+          )
+        } else {
+          TabTrackerStats()
+        }
+      }
+
+      val newLog = if (base.blockedLog.size >= 100) base.blockedLog.drop(1) + displayHost else base.blockedLog + displayHost
+      val newTotal = base.blockedTrackersCount + 1
+
       when (category) {
-        com.remmi.browser.security.TrackerCategory.ADVERTISING -> tab.copy(
-          blockedTrackersCount = tab.blockedTrackersCount + 1,
-          adsBlockedCount = tab.adsBlockedCount + 1,
-          blockedLog = newLog
+        com.remmi.browser.security.TrackerCategory.ADVERTISING -> base.copy(
+          blockedTrackersCount = newTotal,
+          adsBlockedCount = base.adsBlockedCount + 1,
+          blockedLog = newLog,
+          isDirty = true,
+          lastUpdated = System.currentTimeMillis()
         )
-        com.remmi.browser.security.TrackerCategory.ANALYTICS -> tab.copy(
-          blockedTrackersCount = tab.blockedTrackersCount + 1,
-          analyticsBlockedCount = tab.analyticsBlockedCount + 1,
-          blockedLog = newLog
+        com.remmi.browser.security.TrackerCategory.ANALYTICS -> base.copy(
+          blockedTrackersCount = newTotal,
+          analyticsBlockedCount = base.analyticsBlockedCount + 1,
+          blockedLog = newLog,
+          isDirty = true,
+          lastUpdated = System.currentTimeMillis()
         )
-        com.remmi.browser.security.TrackerCategory.SOCIAL -> tab.copy(
-          blockedTrackersCount = tab.blockedTrackersCount + 1,
-          socialBlockedCount = tab.socialBlockedCount + 1,
-          blockedLog = newLog
+        com.remmi.browser.security.TrackerCategory.SOCIAL -> base.copy(
+          blockedTrackersCount = newTotal,
+          socialBlockedCount = base.socialBlockedCount + 1,
+          blockedLog = newLog,
+          isDirty = true,
+          lastUpdated = System.currentTimeMillis()
         )
-        com.remmi.browser.security.TrackerCategory.CRYPTOMINING -> tab.copy(
-          blockedTrackersCount = tab.blockedTrackersCount + 1,
-          cryptomineBlockedCount = tab.cryptomineBlockedCount + 1,
-          blockedLog = newLog
+        com.remmi.browser.security.TrackerCategory.CRYPTOMINING -> base.copy(
+          blockedTrackersCount = newTotal,
+          cryptomineBlockedCount = base.cryptomineBlockedCount + 1,
+          blockedLog = newLog,
+          isDirty = true,
+          lastUpdated = System.currentTimeMillis()
         )
-        com.remmi.browser.security.TrackerCategory.FINGERPRINTING -> tab.copy(
-          blockedTrackersCount = tab.blockedTrackersCount + 1,
-          fingerprintBlockedCount = tab.fingerprintBlockedCount + 1,
-          blockedLog = newLog
+        com.remmi.browser.security.TrackerCategory.FINGERPRINTING -> base.copy(
+          blockedTrackersCount = newTotal,
+          fingerprintBlockedCount = base.fingerprintBlockedCount + 1,
+          blockedLog = newLog,
+          isDirty = true,
+          lastUpdated = System.currentTimeMillis()
         )
-        else -> tab.copy(
-          blockedTrackersCount = tab.blockedTrackersCount + 1,
-          adsBlockedCount = tab.adsBlockedCount + 1,
-          blockedLog = newLog
+        else -> base.copy(
+          blockedTrackersCount = newTotal,
+          adsBlockedCount = base.adsBlockedCount + 1,
+          blockedLog = newLog,
+          isDirty = true,
+          lastUpdated = System.currentTimeMillis()
         )
       }
     }
@@ -565,6 +698,8 @@ class TabManager {
 
   fun purgePrivateTabs() {
     val nonPrivateTabs = _tabs.value.filter { it.profile != PrivacyProfile.GHOST && it.profile != PrivacyProfile.INCOGNITO }
+    val removedIds = _tabs.value.filter { it.profile == PrivacyProfile.GHOST || it.profile == PrivacyProfile.INCOGNITO }.map { it.id }
+    removedIds.forEach { trackerStatsMap.remove(it) }
     if (nonPrivateTabs.isEmpty()) {
       resetToSingleBlankTab(PrivacyProfile.SHIELD)
     } else {
@@ -575,6 +710,7 @@ class TabManager {
   }
 
   fun resetToSingleBlankTab(defaultProfile: PrivacyProfile = PrivacyProfile.SHIELD) {
+    trackerStatsMap.clear()
     val blankTab = BrowserTab(
       id = UUID.randomUUID().toString(),
       url = "about:blank",

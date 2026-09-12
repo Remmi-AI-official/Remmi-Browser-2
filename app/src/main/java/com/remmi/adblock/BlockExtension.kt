@@ -657,9 +657,11 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                     else -> "none"
                   }
                   val host = try { java.net.URI(if (url.contains("://")) url else "https://$url").host?.lowercase() ?: "" } catch (_: Exception) { "" }
-                  val decisionDiagMsg = "[FORENSIC][DECISION_DIAG] url=$url domain=$host type=$resourceType decision=${if (decision.blocked) "BLOCK" else "ALLOW"} ruleId=${decision.ruleId} ruleSource=${decision.ruleSource} generation=${decision.engineGeneration} list=$listResponsible"
-                  Log.d(TAG, decisionDiagMsg)
-                  com.remmi.browser.util.DebugLogManager.log(decisionDiagMsg)
+                  if (com.remmi.browser.BuildConfig.DEBUG) {
+                    val decisionDiagMsg = "[FORENSIC][DECISION_DIAG] url=$url domain=$host type=$resourceType decision=${if (decision.blocked) "BLOCK" else "ALLOW"} ruleId=${decision.ruleId} ruleSource=${decision.ruleSource} generation=${decision.engineGeneration} list=$listResponsible"
+                    Log.d(TAG, decisionDiagMsg)
+                    com.remmi.browser.util.DebugLogManager.log(decisionDiagMsg)
+                  }
 
                   if (url.contains("adblock-tester.com") || sourceUrl.contains("adblock-tester.com")) {
                     val failureReason = when {

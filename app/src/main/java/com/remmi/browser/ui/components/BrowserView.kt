@@ -224,9 +224,15 @@ fun BrowserView(
     android.util.Log.i("BrowserView", mountMsg)
     com.remmi.browser.util.DebugLogManager.log(mountMsg)
     onDispose {
-      val unmountCaller = try { Thread.currentThread().stackTrace.take(6).joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" } } catch (_: Exception) { "unknown" }
+      val unmountCaller = if (com.remmi.browser.BuildConfig.DEBUG) {
+        try { Thread.currentThread().stackTrace.take(6).joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" } } catch (_: Exception) { "unknown" }
+      } else {
+        "release"
+      }
       val unmountMsg = "[FORENSIC][BROWSER_VIEW_UNMOUNT] tabId=${tab.id} session=$sessId url=${tab.url} reason=BrowserView_disposed caller=$unmountCaller elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
-      android.util.Log.i("BrowserView", unmountMsg)
+      if (com.remmi.browser.BuildConfig.DEBUG) {
+        android.util.Log.d("BrowserView", unmountMsg)
+      }
       com.remmi.browser.util.DebugLogManager.log(unmountMsg)
     }
   }
@@ -302,9 +308,13 @@ fun BrowserView(
       "DISPATCH_LOAD"
     }
 
-    val updateDecisionMsg = "[FORENSIC][BROWSER_VIEW_UPDATE_DECISION] source=LaunchedEffect tabId=${tab.id} tabUrl=${tab.url} lastNavigatedUrl=$lastNavigatedUrl lastDispatchedUrl=$currentDispatched decision=$decision elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
-    Log.i("BrowserView", updateDecisionMsg)
-    com.remmi.browser.util.DebugLogManager.log(updateDecisionMsg)
+    if (com.remmi.browser.BuildConfig.DEBUG || decision == "DISPATCH_LOAD") {
+      val updateDecisionMsg = "[FORENSIC][BROWSER_VIEW_UPDATE_DECISION] source=LaunchedEffect tabId=${tab.id} tabUrl=${tab.url} lastNavigatedUrl=$lastNavigatedUrl lastDispatchedUrl=$currentDispatched decision=$decision elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
+      if (com.remmi.browser.BuildConfig.DEBUG) {
+        Log.d("BrowserView", updateDecisionMsg)
+      }
+      com.remmi.browser.util.DebugLogManager.log(updateDecisionMsg)
+    }
 
     if (decision == "DISPATCH_LOAD") {
       lastNavigatedUrl = tab.url
@@ -430,16 +440,21 @@ fun BrowserView(
           swipeLayout.addView(it)
         }
         geckoViewRef = geckoView
-        val gvId = "0x" + Integer.toHexString(System.identityHashCode(geckoView))
-        val now = android.os.SystemClock.elapsedRealtime()
         val prevTag = geckoView.tag as? String
         val isTagMatch = prevTag == tab.id
-        val updateMsg = "[FORENSIC][VIEW_UPDATE] tabId=${tab.id} view=$gvId tag=$prevTag isTagMatch=$isTagMatch url=${tab.url} elapsedRealtime=$now"
-        android.util.Log.i("BrowserView", updateMsg)
-        com.remmi.browser.util.DebugLogManager.log(updateMsg)
 
-        val isSessionAttached = geckoView.session != null && geckoEngine.getAttachedView(tab.id) === geckoView && geckoEngine.isViewAttached(tab.id)
-        if (!isTagMatch || (!isSessionAttached && !isAttachingOrAttached)) {
+        if (com.remmi.browser.BuildConfig.DEBUG) {
+          val gvId = "0x" + Integer.toHexString(System.identityHashCode(geckoView))
+          val now = android.os.SystemClock.elapsedRealtime()
+          val updateMsg = "[FORENSIC][VIEW_UPDATE] tabId=${tab.id} view=$gvId tag=$prevTag isTagMatch=$isTagMatch url=${tab.url} elapsedRealtime=$now"
+          android.util.Log.d("BrowserView", updateMsg)
+          com.remmi.browser.util.DebugLogManager.log(updateMsg)
+        }
+
+        val isSessionAttached = geckoView.session != null && geckoEngine.getAttachedView(tab.id) === geckoView
+        val isAlreadyMatched = isTagMatch && isSessionAttached
+
+        if (!isAlreadyMatched) {
           isAttachingOrAttached = true
           val oldTabId = if (!isTagMatch) prevTag else null
           geckoView.tag = tab.id
@@ -485,7 +500,7 @@ fun BrowserView(
 
           val isRealWebUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
           if (isRealWebUrl) {
-            com.remmi.browser.engine.TabThumbnailManager.getInstance(context).captureGeckoView(tab.id, geckoView)
+            com.remmi.browser.engine.TabThumbnailManager.getInstance(context).captureGeckoView(tab.id, geckoView, debounceMs = 0L)
           }
           geckoViewRef = null
         }

@@ -205,10 +205,12 @@ fun BrowserScreen(
 
   val composeCount = remember { java.util.concurrent.atomic.AtomicInteger(0) }
   SideEffect {
-    val count = composeCount.incrementAndGet()
-    if (count % 25 == 1) {
-      val curTabId = tabManager.activeTab?.id ?: "none"
-      android.util.Log.d("BrowserScreen", "[COMPOSE] count=$count activeTabId=$curTabId")
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      val count = composeCount.incrementAndGet()
+      if (count % 25 == 1) {
+        val curTabId = tabManager.activeTab?.id ?: "none"
+        android.util.Log.d("BrowserScreen", "[COMPOSE] count=$count activeTabId=$curTabId")
+      }
     }
   }
 
@@ -220,12 +222,20 @@ fun BrowserScreen(
   DisposableEffect(Unit) {
     val curTabId = tabManager.activeTab?.id ?: "none"
     val enterMsg = "[FORENSIC][COMPOSE_ENTER] screen=BrowserScreen tabId=$curTabId tabCount=${tabManager.tabs.value.size} activeIndex=${tabManager.activeTabIndex.value} elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
-    android.util.Log.i("BrowserScreen", enterMsg)
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      android.util.Log.d("BrowserScreen", enterMsg)
+    }
     com.remmi.browser.util.DebugLogManager.log(enterMsg)
     onDispose {
-      val exitCaller = try { Thread.currentThread().stackTrace.take(6).joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" } } catch (_: Exception) { "unknown" }
+      val exitCaller = if (com.remmi.browser.BuildConfig.DEBUG) {
+        try { Thread.currentThread().stackTrace.take(6).joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" } } catch (_: Exception) { "unknown" }
+      } else {
+        "release"
+      }
       val exitMsg = "[FORENSIC][COMPOSE_EXIT] screen=BrowserScreen tabId=$curTabId tabCount=${tabManager.tabs.value.size} activeIndex=${tabManager.activeTabIndex.value} reason=BrowserScreen_left_composition caller=$exitCaller elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
-      android.util.Log.i("BrowserScreen", exitMsg)
+      if (com.remmi.browser.BuildConfig.DEBUG) {
+        android.util.Log.d("BrowserScreen", exitMsg)
+      }
       com.remmi.browser.util.DebugLogManager.log(exitMsg)
     }
   }

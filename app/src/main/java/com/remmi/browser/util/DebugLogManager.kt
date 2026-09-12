@@ -55,7 +55,28 @@ object DebugLogManager {
     }
   }
 
+  fun logDebug(message: String) {
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      log(message)
+    }
+  }
+
+  inline fun logDebug(messageSupplier: () -> String) {
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      log(messageSupplier())
+    }
+  }
+
   fun log(message: String) {
+    // In release builds, suppress high-frequency verbose view updates and intermediate progress to minimize main-thread overhead
+    if (!com.remmi.browser.BuildConfig.DEBUG) {
+      if (message.startsWith("[FORENSIC][VIEW_UPDATE]") || 
+          message.startsWith("[FORENSIC][DECISION_DIAG]") ||
+          (message.startsWith("[FORENSIC] [NAV_PROGRESS]") && !message.contains("state=start") && !message.contains("progress=100") && !message.contains("progress=0"))) {
+        return
+      }
+    }
+
     val timestamp = synchronized(timeFormat) { timeFormat.format(Date()) }
     val sanitized = sanitize(message)
     val thread = Thread.currentThread()
@@ -63,7 +84,9 @@ object DebugLogManager {
     val pid = Process.myPid()
     val entry = "[$timestamp][session=$sess][pid=$pid][thread=${thread.name}(${thread.id})] $sanitized"
 
-    Log.d(TAG, sanitized)
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      Log.d(TAG, sanitized)
+    }
 
     // 1. Update in-memory StateFlow for UI (newest first)
     synchronized(this) {
@@ -99,52 +122,81 @@ object DebugLogManager {
   }
 
   fun sanitize(message: String): String {
+    // Fast path: if the string does not contain URLs, headers, or credential markers, skip all regex work
+    val hasUrl = message.contains("://") || message.contains(".onion")
+    val hasCredentialOrHeader = message.contains(":") || message.contains("=")
+
+    if (!hasUrl && !hasCredentialOrHeader) {
+      return message
+    }
+
     var sanitized = message
 
     // 1. Redact downloadUrl=... in any log message to strictly hide signed URLs
-    sanitized = sanitized.replace(Regex("""downloadUrl=(https?://[^\s]+)""")) { mr ->
-      val rawUrl = mr.groupValues[1]
-      val host = UrlSanitizer.extractHost(rawUrl)
-      val hash = UrlSanitizer.sha256(rawUrl)
-      "downloadUrl=<REDACTED> downloadHost=$host urlHash=$hash"
+    if (sanitized.contains("downloadUrl=")) {
+      sanitized = sanitized.replace(Regex("""downloadUrl=(https?://[^\s]+)""")) { mr ->
+        val rawUrl = mr.groupValues[1]
+        val host = UrlSanitizer.extractHost(rawUrl)
+        val hash = UrlSanitizer.sha256(rawUrl)
+        "downloadUrl=<REDACTED> downloadHost=$host urlHash=$hash"
+      }
     }
 
     // 2. Redact signed storage URLs pointing to cloud buckets
-    sanitized = sanitized.replace(Regex("""https?://([a-zA-Z0-9.\-]+(?:\.googleusercontent\.com|\.amazonaws\.com|\.storage\.googleapis\.com|\.core\.windows\.net))/[^\s]*""")) { mr ->
-      val host = mr.groupValues[1]
-      val hash = UrlSanitizer.sha256(mr.value)
-      "https://$host/[REDACTED_STORAGE_URL]?urlHash=$hash"
+    if (sanitized.contains(".com/") || sanitized.contains(".net/")) {
+      sanitized = sanitized.replace(Regex("""https?://([a-zA-Z0-9.\-]+(?:\.googleusercontent\.com|\.amazonaws\.com|\.storage\.googleapis\.com|\.core\.windows\.net))/[^\s]*""")) { mr ->
+        val host = mr.groupValues[1]
+        val hash = UrlSanitizer.sha256(mr.value)
+        "https://$host/[REDACTED_STORAGE_URL]?urlHash=$hash"
+      }
     }
 
     // 3. Redact query parameters in standard URLs
-    sanitized = sanitized.replace(Regex("""(https?://[^\s?#]+)\?[^\s]*""")) { mr ->
-      "${mr.groupValues[1]}?[REDACTED_QUERY]"
+    if (sanitized.contains("?")) {
+      sanitized = sanitized.replace(Regex("""(https?://[^\s?#]+)\?[^\s]*""")) { mr ->
+        "${mr.groupValues[1]}?[REDACTED_QUERY]"
+      }
     }
 
     // 4. Redact private file:// and content:// URLs
-    sanitized = sanitized.replace(Regex("""file:///(?:data/user/\d+|data/data)/[^\s/]+/([^\s]+)""")) { mr ->
-      "file://[REDACTED_PRIVATE_APP_DIR]/${mr.groupValues[1]}"
-    }
-    sanitized = sanitized.replace(Regex("""content://[^\s]+""")) {
-      "content://[REDACTED_CONTENT_URI]"
+    if (sanitized.contains("file://") || sanitized.contains("content://")) {
+      sanitized = sanitized.replace(Regex("""file:///(?:data/user/\d+|data/data)/[^\s/]+/([^\s]+)""")) { mr ->
+        "file://[REDACTED_PRIVATE_APP_DIR]/${mr.groupValues[1]}"
+      }
+      sanitized = sanitized.replace(Regex("""content://[^\s]+""")) {
+        "content://[REDACTED_CONTENT_URI]"
+      }
     }
 
     // 5. Redact authorization headers, bearer tokens, passwords, cookies, secrets, signatures
-    sanitized = sanitized.replace(
-      Regex("""(?i)\b(authorization|bearer|token|password|passwd|secret|cookie|set-cookie|key|pin|passphrase|signature|sig|access_token|refresh_token|id_token|session_token|auth_token)\s*[:=]\s*([^\s,;]+)""")
-    ) { mr ->
-      "${mr.groupValues[1]}: [REDACTED]"
+    val lower = sanitized.lowercase(Locale.ROOT)
+    if (lower.contains("authorization") || lower.contains("bearer") || lower.contains("token") ||
+        lower.contains("password") || lower.contains("passwd") || lower.contains("secret") ||
+        lower.contains("cookie") || lower.contains("key") || lower.contains("pin") ||
+        lower.contains("signature") || lower.contains("sig") || lower.contains("auth")) {
+      // 5. Redact standalone Bearer tokens
+      if (lower.contains("bearer")) {
+        sanitized = sanitized.replace(Regex("""(?i)\bBearer\s+[A-Za-z0-9\-._~+/=]+"""), "Bearer [REDACTED]")
+      }
+
+      // 6. Redact Basic auth blobs
+      if (lower.contains("basic")) {
+        sanitized = sanitized.replace(Regex("""(?i)Basic\s+[A-Za-z0-9+/=]+"""), "Basic [REDACTED]")
+      }
+
+      // 7. Redact authorization headers, bearer tokens, passwords, cookies, secrets, signatures
+      sanitized = sanitized.replace(
+        Regex("""(?i)\b(authorization|bearer|token|password|passwd|secret|cookie|set-cookie|key|pin|passphrase|signature|sig|access_token|refresh_token|id_token|session_token|auth_token)\s*[:=]\s*([^\s,;]+)""")
+      ) { mr ->
+        "${mr.groupValues[1]}: [REDACTED]"
+      }
     }
 
-    // 6. Redact standalone Bearer tokens
-    sanitized = sanitized.replace(Regex("""(?i)\bBearer\s+[A-Za-z0-9\-._~+/=]+"""), "Bearer [REDACTED]")
-
-    // 7. Redact Basic auth blobs
-    sanitized = sanitized.replace(Regex("""(?i)Basic\s+[A-Za-z0-9+/=]+"""), "Basic [REDACTED]")
-
     // 8. Redact Onion addresses query params or paths
-    sanitized = sanitized.replace(Regex("""([a-z2-7]{56}\.onion)/[^\s?#]*\?[^\s]*""")) { mr ->
-      "${mr.groupValues[1]}/[REDACTED_PATH]?[REDACTED_QUERY]"
+    if (sanitized.contains(".onion")) {
+      sanitized = sanitized.replace(Regex("""([a-z2-7]{56}\.onion)/[^\s?#]*\?[^\s]*""")) { mr ->
+        "${mr.groupValues[1]}/[REDACTED_PATH]?[REDACTED_QUERY]"
+      }
     }
 
     return sanitized

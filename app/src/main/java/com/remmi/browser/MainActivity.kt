@@ -298,6 +298,22 @@ class MainActivity : FragmentActivity() {
     com.remmi.browser.security.permissions.PermissionSessionManager.getInstance().onAppBackgrounded()
   }
 
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    try {
+      com.remmi.browser.engine.TabThumbnailManager.getInstance(this).onTrimMemory(level)
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(this).onTrimMemory(level)
+    } catch (_: Throwable) {}
+  }
+
+  override fun onLowMemory() {
+    super.onLowMemory()
+    try {
+      com.remmi.browser.engine.TabThumbnailManager.getInstance(this).onLowMemory()
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(this).onLowMemory()
+    } catch (_: Throwable) {}
+  }
+
   override fun onDestroy() {
     if (isFinishing) {
       com.remmi.browser.util.CrashHandlerHelper.markCleanShutdown(this)

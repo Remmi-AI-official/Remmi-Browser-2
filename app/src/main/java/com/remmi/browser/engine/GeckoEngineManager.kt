@@ -173,7 +173,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     try {
       val view = attachedViews[tabId]
       if (view != null && view.session?.isOpen == true) {
-        TabThumbnailManager.getInstance(context).captureGeckoView(tabId, view)
+        TabThumbnailManager.getInstance(context).captureGeckoView(tabId, view, debounceMs = 0L, force = true)
       }
     } catch (e: Exception) {
       Log.d(TAG, "captureTabThumbnail notice on tab $tabId: ${e.message}")
@@ -542,9 +542,14 @@ class GeckoEngineManager private constructor(private val context: Context) {
     accepted: Boolean,
     reason: String
   ) {
-    val msg = "[FORENSIC][PROGRESS_STATE] navId=$navId generation=$generation event=$event oldProgress=$oldProgress newProgress=$newProgress isLoading=$isLoading accepted=$accepted reason=$reason"
-    Log.i(TAG, msg)
-    com.remmi.browser.util.DebugLogManager.log(msg)
+    val isMilestone = event != "NAV_PROGRESS" || newProgress == 0 || newProgress == 100 || !accepted
+    if (com.remmi.browser.BuildConfig.DEBUG || isMilestone) {
+      val msg = "[FORENSIC][PROGRESS_STATE] navId=$navId generation=$generation event=$event oldProgress=$oldProgress newProgress=$newProgress isLoading=$isLoading accepted=$accepted reason=$reason"
+      if (com.remmi.browser.BuildConfig.DEBUG) {
+        Log.d(TAG, msg)
+      }
+      com.remmi.browser.util.DebugLogManager.log(msg)
+    }
   }
 
   fun logRecoveryUrlState(
@@ -573,6 +578,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
   }
 
   fun getMemoryForensicSnapshot(trigger: String): String {
+    if (!com.remmi.browser.BuildConfig.DEBUG && trigger == "NAV_START") {
+      return ""
+    }
     val snap = try { com.remmi.browser.util.ProcessMemoryTelemetry.captureSnapshot() } catch (_: Throwable) { null }
     val rssMb = (snap?.rssBytes ?: 0L) / (1024 * 1024)
     val pssMb = (snap?.pssBytes ?: 0L) / (1024 * 1024)
@@ -582,7 +590,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val availBytes = com.remmi.browser.util.HangWatchdog.getAvailableMemBytes(context)
     val availStr = if (availBytes != null) " availMem=${availBytes / (1024 * 1024)}MB" else ""
     val memMsg = "[FORENSIC][MEMORY_SNAPSHOT] trigger=$trigger rss=${rssMb}MB pss=${pssMb}MB javaHeap=${javaUsedMb}/${javaMaxMb}MB nativeHeap=${nativeMb}MB$availStr"
-    Log.i(TAG, memMsg)
+    if (com.remmi.browser.BuildConfig.DEBUG) {
+      Log.d(TAG, memMsg)
+    }
     com.remmi.browser.util.DebugLogManager.log(memMsg)
     return memMsg
   }
@@ -2155,8 +2165,10 @@ class GeckoEngineManager private constructor(private val context: Context) {
         navProgressStates[tabId] = newProg
         logProgressState(tabId, navId, gen, "NAV_PROGRESS", oldProg, newProg, true, true, "progress_update")
 
-        val progMsg = "[FORENSIC] [NAV_PROGRESS] tabId=$tabId session=$sessId view=$viewId navId=$navId url=$currUrl progress=$newProg gen=$gen state=update elapsedRealtime=$now"
-        Log.i(TAG, progMsg)
+        if (com.remmi.browser.BuildConfig.DEBUG) {
+          val progMsg = "[FORENSIC] [NAV_PROGRESS] tabId=$tabId session=$sessId view=$viewId navId=$navId url=$currUrl progress=$newProg gen=$gen state=update elapsedRealtime=$now"
+          Log.d(TAG, progMsg)
+        }
 
         sessionCallbacks[tabId]?.onProgressChange(newProg)
       }
@@ -2823,7 +2835,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     }
 
     val currentAttachedView = attachedViews[tabId]
-    if (existingSession != null && existingSession.isOpen && currentAttachedView === geckoView && geckoView.session === existingSession) {
+    if (existingSession != null && currentAttachedView === geckoView && geckoView.session === existingSession) {
       val viewId = "0x" + Integer.toHexString(System.identityHashCode(geckoView))
       val skipMsg = "[FORENSIC] [GECKO_VIEW_ATTACH_RESUME] tabId=$tabId session=$existingSessId view=$viewId gen=$gen reason=idempotency_match elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
       Log.i(TAG, skipMsg)
@@ -2831,6 +2843,15 @@ class GeckoEngineManager private constructor(private val context: Context) {
       
       existingSession.setActive(true)
       _viewAttachmentStates.getOrPut(tabId) { MutableStateFlow(false) }.value = true
+
+      if (!existingSession.isOpen && existingSession !in pendingGeckoOpenSessions) {
+        openSessionSafely(existingSession, tabId, "attachView:RESUME_UNOPENED")
+      }
+
+      val currentNav = sessionNavStates[tabId]
+      if (currentNav != null) {
+        callbacks.onNavStateChange(currentNav.first, currentNav.second)
+      }
       dispatchPendingNavigationIfReady(tabId)
       resumePendingContentRecoveryIfAny(tabId)
       checkViewInvariants(tabId, "ATTACH_SKIP_IDEMPOTENT")
@@ -3468,6 +3489,33 @@ class GeckoEngineManager private constructor(private val context: Context) {
       Log.e(TAG, "Error clearing Gecko storage data: ${e.message}")
       false
     }
+  }
+
+  fun onTrimMemory(level: Int) {
+    Log.d(TAG, "onTrimMemory level=$level")
+    mainHandler.post {
+      // In critical or complete memory trimming, prune idle / non-attached pooled views
+      if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+          level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE ||
+          level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+        val attachedTabIds = attachedViews.keys.toSet()
+        val pooledEntries = geckoViewPool.entries.toList()
+        for ((tabId, gv) in pooledEntries) {
+          if (!attachedTabIds.contains(tabId) && gv.parent == null) {
+            geckoViewPool.remove(tabId)
+            try {
+              gv.releaseSession()
+            } catch (_: Exception) {}
+            Log.d(TAG, "[MEMORY_TRIM] Released idle pooled GeckoView for tabId=$tabId")
+          }
+        }
+      }
+    }
+  }
+
+  fun onLowMemory() {
+    Log.d(TAG, "onLowMemory")
+    onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
   }
 
   companion object {

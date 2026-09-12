@@ -126,7 +126,7 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("""user_pref("privacy.donottrackheader.enabled", true);""")
       appendLine("""user_pref("privacy.globalprivacycontrol.enabled", true);""")
       appendLine("""user_pref("privacy.reduceTimerPrecision", true);""")
-      appendLine("""user_pref("privacy.reduceTimerPrecision.microseconds", 20000);""")
+      appendLine("""user_pref("privacy.reduceTimerPrecision.microseconds", 2000);""") // 2ms standard timing jitter protection (fluid 60fps/120fps animations)
       appendLine("""user_pref("privacy.fingerprintingProtection", true);""")
       appendLine("""user_pref("privacy.fingerprintingProtection.overrides", "+AllTargets,-FrameRate");""")
       appendLine("""user_pref("privacy.firstparty.isolate", true);""")
@@ -148,9 +148,7 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("""user_pref("general.smoothScroll", true);""")
       appendLine("""user_pref("apz.overscroll.enabled", true);""")
       appendLine("""user_pref("apz.allow_zooming", true);""")
-      appendLine("""user_pref("gfx.webrender.all", true);""")
-      appendLine("""user_pref("layers.acceleration.force-enabled", true);""")
-      appendLine("""user_pref("image.mem.surfacecache.max_size_kb", 40960);""")
+      appendLine("""user_pref("image.mem.surfacecache.max_size_kb", 24576);""")
       appendLine("""user_pref("browser.low_end_device_optimizations", true);""")
     }
   }
@@ -214,15 +212,14 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("""user_pref("network.http.referer.defaultPolicy", 3); // no-referrer-when-downgrade""")
       appendLine("""user_pref("network.http.referer.trimmingPolicy", 0);""")
       appendLine("""user_pref("privacy.reduceTimerPrecision", true);""")
-      appendLine("""user_pref("privacy.reduceTimerPrecision.microseconds", 100000);""")
+      appendLine("""user_pref("privacy.reduceTimerPrecision.microseconds", 16666);""") // 16.6ms standard 60Hz frame time clamping (replaces 100ms lag)
+      appendLine("""user_pref("privacy.resistFingerprinting.reduceTimerPrecision.microseconds", 16666);""")
       appendLine()
       appendLine("// Performance & Memory BFCache")
       appendLine("""user_pref("general.smoothScroll", true);""")
       appendLine("""user_pref("browser.cache.memory.enable", true);""")
-      appendLine("""user_pref("browser.cache.memory.capacity", 49152);""")
-      appendLine("""user_pref("gfx.webrender.all", true);""")
-      appendLine("""user_pref("layers.acceleration.force-enabled", true);""")
-      appendLine("""user_pref("image.mem.surfacecache.max_size_kb", 40960);""")
+      appendLine("""user_pref("browser.cache.memory.capacity", 16384);""")
+      appendLine("""user_pref("image.mem.surfacecache.max_size_kb", 24576);""")
       appendLine("""user_pref("browser.low_end_device_optimizations", true);""")
     }
   }
@@ -266,13 +263,11 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("  network.http.referer.defaultPolicy: 3")
       appendLine("  network.http.referer.XOriginPolicy: 0")
       appendLine("  privacy.reduceTimerPrecision: true")
-      appendLine("  privacy.reduceTimerPrecision.microseconds: 100000")
+      appendLine("  privacy.reduceTimerPrecision.microseconds: 16666")
       appendLine("  general.smoothScroll: true")
       appendLine("  browser.cache.memory.enable: true")
-      appendLine("  browser.cache.memory.capacity: 49152")
-      appendLine("  gfx.webrender.all: true")
-      appendLine("  layers.acceleration.force-enabled: true")
-      appendLine("  image.mem.surfacecache.max_size_kb: 40960")
+      appendLine("  browser.cache.memory.capacity: 16384")
+      appendLine("  image.mem.surfacecache.max_size_kb: 24576")
       appendLine("  browser.low_end_device_optimizations: true")
     }
   }
@@ -297,10 +292,10 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("  dom.webaudio.enabled: true")
       appendLine("  dom.maxHardwareConcurrency: 2")
       appendLine("  media.peerconnection.enabled: false")
+      appendLine("  privacy.reduceTimerPrecision: true")
+      appendLine("  privacy.reduceTimerPrecision.microseconds: 2000")
       appendLine("  general.smoothScroll: true")
-      appendLine("  gfx.webrender.all: true")
-      appendLine("  layers.acceleration.force-enabled: true")
-      appendLine("  image.mem.surfacecache.max_size_kb: 40960")
+      appendLine("  image.mem.surfacecache.max_size_kb: 24576")
       appendLine("  browser.low_end_device_optimizations: true")
     }
   }
@@ -440,14 +435,18 @@ class ProfileConfigManager(private val context: Context) {
         content.contains("network.dns.echconfig.enabled") &&
         content.contains("network.http.referer.trimmingPolicy") &&
         content.contains("dom.webaudio.enabled") &&
-        content.contains("privacy.resistFingerprinting.randomDataOnCanvasExtract")
+        content.contains("privacy.resistFingerprinting.randomDataOnCanvasExtract") &&
+        !content.contains("gfx.webrender.all") &&
+        !content.contains("layers.acceleration.force-enabled")
       }
       Mode.TOR -> {
         content.contains("network.proxy.type") &&
         content.contains("network.proxy.socks_remote_dns") &&
         content.contains("privacy.resistFingerprinting.letterboxing") &&
         content.contains("dom.maxHardwareConcurrency") &&
-        content.contains("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts")
+        content.contains("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts") &&
+        !content.contains("gfx.webrender.all") &&
+        !content.contains("layers.acceleration.force-enabled")
       }
     }
   }

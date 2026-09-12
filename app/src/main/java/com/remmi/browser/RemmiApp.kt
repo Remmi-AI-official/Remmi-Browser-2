@@ -120,5 +120,21 @@ class RemmiApp : Application(), SingletonImageLoader.Factory {
       }
     }
   }
+
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    try {
+      com.remmi.browser.engine.TabThumbnailManager.getInstance(this).onTrimMemory(level)
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(this).onTrimMemory(level)
+    } catch (_: Throwable) {}
+  }
+
+  override fun onLowMemory() {
+    super.onLowMemory()
+    try {
+      com.remmi.browser.engine.TabThumbnailManager.getInstance(this).onLowMemory()
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(this).onLowMemory()
+    } catch (_: Throwable) {}
+  }
 }
 

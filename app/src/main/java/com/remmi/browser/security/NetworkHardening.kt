@@ -101,7 +101,7 @@ object NetworkHardening {
       "network.http.referer.XOriginTrimmingPolicy" to 2,
       "network.http.referer.defaultPolicy" to 2,
       "privacy.reduceTimerPrecision" to true,
-      "privacy.reduceTimerPrecision.microseconds" to 100000,
+      "privacy.reduceTimerPrecision.microseconds" to 16666, // 16.6ms standard 60Hz frame time clamping (prevents animation jitter)
       // Smooth Scrolling & Hardware Acceleration
       "general.smoothScroll" to true,
       "general.smoothScroll.lines" to true,
@@ -120,16 +120,16 @@ object NetworkHardening {
       "layout.css.scroll-behavior.enabled" to true,
       "privacy.resistFingerprinting.reduceTimerPrecision.microseconds" to 16666,
       // High-Speed In-Memory BFCache (Back/Forward Cache) for instant 0ms back/forward & recent tab switching
-      "browser.sessionhistory.max_total_viewers" to 4,
-      "browser.sessionhistory.max_entries" to 50,
+      "browser.sessionhistory.max_total_viewers" to 2,
+      "browser.sessionhistory.max_entries" to 25,
       "fission.bfcacheInParent" to true,
       "docshell.shistory.bfcache.ship_mode" to 1,
       "browser.cache.memory.enable" to true,
-      "browser.cache.memory.capacity" to 49152, // 48MB RAM cache for instant back/forward in Ghost mode
-      "browser.cache.memory.max_entry_size" to 8192,
+      "browser.cache.memory.capacity" to 16384, // 16MB RAM cache in Ghost mode
+      "browser.cache.memory.max_entry_size" to 4096,
       "network.http.rcwn.enabled" to true, // Race Cache With Network for instant cached loads
-      "image.mem.surfacecache.max_size_kb" to 65536,
-      "image.mem.decode_bytes_at_a_time" to 65536,
+      "image.mem.surfacecache.max_size_kb" to 24576,
+      "image.mem.decode_bytes_at_a_time" to 32768,
     )
   }
 
@@ -170,7 +170,7 @@ object NetworkHardening {
       "network.http.referer.XOriginTrimmingPolicy" to 2,
       "network.http.referer.defaultPolicy" to 2,
       "privacy.reduceTimerPrecision" to true,
-      "privacy.reduceTimerPrecision.microseconds" to 20000,
+      "privacy.reduceTimerPrecision.microseconds" to 2000, // 2ms standard timing jitter protection (fluid 60fps/120fps animations)
       "dom.webaudio.enabled" to true,
       "privacy.resistFingerprinting" to false,
       "privacy.resistFingerprinting.letterboxing" to false,
@@ -197,22 +197,22 @@ object NetworkHardening {
       "apz.velocity_bias" to "1.0",
       "layout.css.touch_action.enabled" to true,
       "layout.css.scroll-behavior.enabled" to true,
-      // High-Speed In-Memory BFCache & Large Disk Cache for 0ms Back/Forward & Recent Apps Resume
-      "browser.sessionhistory.max_total_viewers" to 5,
-      "browser.sessionhistory.max_entries" to 50,
+      // High-Speed In-Memory BFCache & Disk Cache for 0ms Back/Forward & Recent Apps Resume
+      "browser.sessionhistory.max_total_viewers" to 3,
+      "browser.sessionhistory.max_entries" to 30,
       "fission.bfcacheInParent" to true,
       "docshell.shistory.bfcache.ship_mode" to 1,
       "browser.cache.memory.enable" to true,
-      "browser.cache.memory.capacity" to 65536, // 64 MB fast RAM cache
-      "browser.cache.memory.max_entry_size" to 10240, // 10 MB per entry
+      "browser.cache.memory.capacity" to 24576, // 24 MB fast RAM cache
+      "browser.cache.memory.max_entry_size" to 4096, // 4 MB per entry
       "browser.cache.disk.enable" to true,
-      "browser.cache.disk.capacity" to 1048576, // 1 GB disk cache for instant offline/recent loads
+      "browser.cache.disk.capacity" to 524288, // 512 MB disk cache
       "browser.cache.disk.smart_size.enabled" to true,
       "browser.cache.disk_cache_ssl" to true,
       "browser.cache.offline.enable" to true,
       "network.http.rcwn.enabled" to true, // Race Cache With Network for instant cached loads
-      "image.mem.surfacecache.max_size_kb" to 102400, // 100 MB decoded image surface cache
-      "image.mem.decode_bytes_at_a_time" to 65536,
+      "image.mem.surfacecache.max_size_kb" to 24576, // 24 MB decoded image surface cache
+      "image.mem.decode_bytes_at_a_time" to 32768,
       "network.http.max-connections" to 64,
       "network.http.max-persistent-connections-per-server" to 10,
       "layout.css.prefers-color-scheme.content-override" to (if (settings?.darkThemeForAllWebPages == true) 0 else 2),
