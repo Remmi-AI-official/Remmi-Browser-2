@@ -1743,14 +1743,19 @@ class GeckoEngineManager private constructor(private val context: Context) {
         Log.i(TAG, navLocMsg)
         com.remmi.browser.util.DebugLogManager.log(navLocMsg)
 
+        val tab = TabManager.getInstance().getTab(tabId)
+        val hasExplicitHome = TabManager.getInstance().hasExplicitHomeIntent(tabId) || (tab?.explicitHomeIntent == true)
+        val hasCommittedReal = (tab?.lastCommittedUrl != null && !isInternalOrIgnoredUrl(tab.lastCommittedUrl)) ||
+                               (lastObservedUrls[tabId] != null && !isInternalOrIgnoredUrl(lastObservedUrls[tabId]))
         val activeDispatched = lastDispatchedUrls[tabId]
-        val isIntentionalBlank = activeDispatched == "about:blank" || 
+        val isIntentionalBlank = hasExplicitHome && (activeDispatched == "about:blank" || 
                                  activeDispatched == null || 
                                  activeDispatched.isBlank() ||
                                  activeDispatched == "remmi://newtab" ||
-                                 activeDispatched == "about:home"
+                                 activeDispatched == "about:home")
         val isNavigatingRealUrl = inFlightNavigations.containsKey(tabId) || 
-                                  (!activeDispatched.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatched))
+                                  (!activeDispatched.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatched)) ||
+                                  hasCommittedReal
 
         val prevObserved = lastObservedUrls[tabId]
         val prevDispatched = lastDispatchedUrls[tabId]
@@ -1792,15 +1797,15 @@ class GeckoEngineManager private constructor(private val context: Context) {
           }
           logRecoveryUrlState(tabId, activeNavId, genBefore, url, true, activeRecovery?.targetUrl, "NORMAL", "PROCESS_NORMAL")
         } else {
-          if (url == "about:blank") {
+          if (url == "about:blank" || url.isNullOrBlank()) {
             if (!isIntentionalBlank && navLoadingStates[tabId] == true) {
               checkPostNavFailure(tabId, "ABOUT_BLANK", "about:blank")
             }
-            if (!isIntentionalBlank && isNavigatingRealUrl) {
+            if (!isIntentionalBlank || isNavigatingRealUrl || hasCommittedReal) {
               val transMsg = "[FORENSIC][SUPPRESS_TRANSIENT_ABOUT_BLANK] tabId=$tabId targetUrl=$activeDispatched elapsedRealtime=$now"
               Log.i(TAG, transMsg)
               com.remmi.browser.util.DebugLogManager.log(transMsg)
-              logRecoveryUrlState(tabId, activeNavId, genBefore, url, false, null, "TRANSIENT_ABOUT_BLANK", "SUPPRESS_LOCATION_UPDATE")
+              logRecoveryUrlState(tabId, activeNavId, genBefore, url ?: "", false, null, "TRANSIENT_ABOUT_BLANK", "SUPPRESS_LOCATION_UPDATE")
               return
             }
           }
@@ -1881,15 +1886,19 @@ class GeckoEngineManager private constructor(private val context: Context) {
             }
             if (it == "about:blank") {
               val activeDispatchedUrl = lastDispatchedUrls[tabId]
-              val isIntentionalBlank = activeDispatchedUrl == "about:blank" || 
+              val hasHome = TabManager.getInstance().hasExplicitHomeIntent(tabId) || (tab?.explicitHomeIntent == true)
+              val isIntentionalBlank = hasHome && (activeDispatchedUrl == "about:blank" || 
                                        activeDispatchedUrl == null || 
                                        activeDispatchedUrl.isBlank() ||
                                        activeDispatchedUrl == "remmi://newtab" ||
-                                       activeDispatchedUrl == "about:home"
+                                       activeDispatchedUrl == "about:home")
+              val hasCommitted = (tab?.lastCommittedUrl != null && !isInternalOrIgnoredUrl(tab.lastCommittedUrl)) ||
+                                 (lastObservedUrls[tabId] != null && !isInternalOrIgnoredUrl(lastObservedUrls[tabId]))
               val isNavigatingRealUrl = inFlightNavigations.containsKey(tabId) || 
-                                        (!activeDispatchedUrl.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatchedUrl))
+                                        (!activeDispatchedUrl.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatchedUrl)) ||
+                                        hasCommitted
 
-              if (!isIntentionalBlank && isNavigatingRealUrl) {
+              if (!isIntentionalBlank || isNavigatingRealUrl) {
                 val transMsg = "[FORENSIC][SUPPRESS_TRANSIENT_ABOUT_BLANK_CALLBACK] tabId=$tabId targetUrl=$activeDispatchedUrl"
                 Log.i(TAG, transMsg)
                 com.remmi.browser.util.DebugLogManager.log(transMsg)
@@ -3089,6 +3098,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
       return
     }
 
+    if (targetUrl != "about:blank" && !isInternalOrIgnoredUrl(targetUrl)) {
+      TabManager.getInstance().setExplicitHomeIntent(tabId, false)
+    }
     lastDispatchedUrls[tabId] = targetUrl
     pendingNavigations.remove(tabId)
     dispatchedNavigationsHistory.getOrPut(tabId) { mutableListOf() }.add(targetUrl)
@@ -3160,6 +3172,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       Log.i(TAG, "[FORENSIC] NAV_NEW_TAB_TRANSITION tabId=$tabId")
       logDestructiveOp("RESET_TO_NEW_TAB", tabId, session, null, null, "resetToNewTab")
       checkPostNavFailure(tabId, "RESET_TO_NEW_TAB")
+      TabManager.getInstance().setExplicitHomeIntent(tabId, true)
       lastDispatchedUrls[tabId] = "about:blank"
       inFlightNavigations.remove(tabId)
       val pendingRec = pendingContentRecoveries.remove(tabId)

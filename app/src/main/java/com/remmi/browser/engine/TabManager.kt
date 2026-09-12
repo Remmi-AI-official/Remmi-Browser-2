@@ -73,6 +73,16 @@ class TabManager {
     return _tabs.value.find { it.id == tabId }
   }
 
+  private val navTransactionsByTab = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
+  fun nextNavigationTransactionId(tabId: String): Long {
+    return navTransactionsByTab.getOrPut(tabId) { java.util.concurrent.atomic.AtomicLong(0L) }.incrementAndGet()
+  }
+
+  fun getNavigationTransactionId(tabId: String): Long {
+    return navTransactionsByTab[tabId]?.get() ?: 0L
+  }
+
   fun createTab(
     url: String = "about:blank",
     profile: PrivacyProfile = PrivacyProfile.SHIELD,
@@ -83,10 +93,17 @@ class TabManager {
     parentTabId: String? = null,
     openedFromLink: Boolean = false,
   ): BrowserTab {
+    val tabId = UUID.randomUUID().toString()
     val hasTargetUrl = url.isNotBlank() && url != "about:blank" && url != "about:home"
+    val txId = if (hasTargetUrl) nextNavigationTransactionId(tabId) else 0L
     val newTab = BrowserTab(
-      id = UUID.randomUUID().toString(),
+      id = tabId,
       url = url,
+      requestedUrl = if (hasTargetUrl) url else null,
+      lastCommittedUrl = if (hasTargetUrl) url else null,
+      visibleUrl = url,
+      explicitHomeIntent = !hasTargetUrl,
+      navigationTransactionId = txId,
       title = if (hasTargetUrl) "Loading..." else "New Tab",
       profile = profile,
       containerType = containerType,
@@ -100,6 +117,7 @@ class TabManager {
       parentTabId = parentTabId,
       openedFromLink = openedFromLink,
     )
+    explicitHomeIntentByTab[tabId] = !hasTargetUrl
     _tabs.value = _tabs.value + newTab
     _activeTabIndex.value = _tabs.value.lastIndex
     return newTab
@@ -115,10 +133,17 @@ class TabManager {
     parentTabId: String? = null,
     openedFromLink: Boolean = false,
   ) {
+    val tabId = UUID.randomUUID().toString()
     val hasTargetUrl = url.isNotBlank() && url != "about:blank" && url != "about:home"
+    val txId = if (hasTargetUrl) nextNavigationTransactionId(tabId) else 0L
     val newTab = BrowserTab(
-      id = UUID.randomUUID().toString(),
+      id = tabId,
       url = url,
+      requestedUrl = if (hasTargetUrl) url else null,
+      lastCommittedUrl = if (hasTargetUrl) url else null,
+      visibleUrl = url,
+      explicitHomeIntent = !hasTargetUrl,
+      navigationTransactionId = txId,
       title = if (hasTargetUrl) "Loading..." else "New Tab",
       profile = profile,
       containerType = containerType,
@@ -132,6 +157,7 @@ class TabManager {
       parentTabId = parentTabId,
       openedFromLink = openedFromLink,
     )
+    explicitHomeIntentByTab[tabId] = !hasTargetUrl
     _tabs.value = _tabs.value + newTab
     _activeTabIndex.value = _tabs.value.lastIndex
   }
@@ -146,10 +172,17 @@ class TabManager {
     parentTabId: String? = null,
     openedFromLink: Boolean = false,
   ) {
+    val tabId = UUID.randomUUID().toString()
     val hasTargetUrl = url.isNotBlank() && url != "about:blank" && url != "about:home"
+    val txId = if (hasTargetUrl) nextNavigationTransactionId(tabId) else 0L
     val newTab = BrowserTab(
-      id = UUID.randomUUID().toString(),
+      id = tabId,
       url = url,
+      requestedUrl = if (hasTargetUrl) url else null,
+      lastCommittedUrl = if (hasTargetUrl) url else null,
+      visibleUrl = url,
+      explicitHomeIntent = !hasTargetUrl,
+      navigationTransactionId = txId,
       title = if (hasTargetUrl) "Loading..." else "New Tab",
       profile = profile,
       containerType = containerType,
@@ -163,6 +196,7 @@ class TabManager {
       parentTabId = parentTabId,
       openedFromLink = openedFromLink,
     )
+    explicitHomeIntentByTab[tabId] = !hasTargetUrl
     _tabs.value = _tabs.value + newTab
   }
 
@@ -182,10 +216,17 @@ class TabManager {
     val safeUrl = navigationCheck.sanitizedUrl ?: url
 
     val currentTab = activeTab
-    if (currentTab != null && (currentTab.url == "about:blank" || currentTab.url.isEmpty())) {
+    if (currentTab != null && (currentTab.url == "about:blank" || currentTab.url.isEmpty() || currentTab.explicitHomeIntent)) {
+      setExplicitHomeIntent(currentTab.id, false)
+      val txId = nextNavigationTransactionId(currentTab.id)
       updateTab(currentTab.id) {
         it.copy(
           url = safeUrl,
+          requestedUrl = safeUrl,
+          visibleUrl = safeUrl,
+          lastCommittedUrl = safeUrl,
+          explicitHomeIntent = false,
+          navigationTransactionId = txId,
           title = "Loading...",
           profile = profile,
           isDesktopMode = isDesktop,
@@ -221,6 +262,24 @@ class TabManager {
 
   fun setExplicitHomeIntent(tabId: String, requested: Boolean) {
     explicitHomeIntentByTab[tabId] = requested
+    val currentTabs = _tabs.value
+    if (currentTabs.any { it.id == tabId }) {
+      updateTab(tabId) {
+        if (requested) {
+          it.copy(
+            explicitHomeIntent = true,
+            url = "about:blank",
+            visibleUrl = "about:blank",
+            requestedUrl = null,
+            title = "New Tab",
+            isLoading = false,
+            progress = 0
+          )
+        } else {
+          it.copy(explicitHomeIntent = false)
+        }
+      }
+    }
   }
 
   fun hasExplicitHomeIntent(tabId: String): Boolean {
@@ -241,19 +300,46 @@ class TabManager {
 
         // INVARIANT: A transient Gecko about:blank event MUST NOT erase a previously successful active URL.
         // If the updated tab is trying to set an about:blank / empty URL, but the tab previously had
-        // a real web URL and explicit home intent was NOT registered, reject erasing the active URL.
+        // a real web URL or committed URL and explicit home intent was NOT registered, reject erasing the active URL.
         val isBlankTarget = updated.url.isBlank() || updated.url == "about:blank" || updated.url == "remmi://newtab" || updated.url == "about:home"
         val hadRealUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
-        if (isBlankTarget && hadRealUrl && !hasExplicitHomeIntent(tabId)) {
+        val hasCommittedReal = !tab.lastCommittedUrl.isNullOrBlank() && tab.lastCommittedUrl != "about:blank" && tab.lastCommittedUrl != "remmi://newtab" && tab.lastCommittedUrl != "about:home"
+        val isExplicitHome = hasExplicitHomeIntent(tabId) || updated.explicitHomeIntent
+
+        if (isBlankTarget && (hadRealUrl || hasCommittedReal) && !isExplicitHome) {
           val caller = try {
             Thread.currentThread().stackTrace.drop(2).take(4)
               .joinToString(" -> ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
           } catch (_: Exception) { "unknown" }
-          val msg = "[FORENSIC][TAB_URL_WRITE_REJECTED] tabId=$tabId attemptedBlankUrl=${updated.url} preservedRealUrl=${tab.url} caller=$caller"
+          val preservedUrl = tab.lastCommittedUrl ?: tab.url
+          val preservedVisible = tab.visibleUrl.takeIf { it.isNotBlank() && it != "about:blank" } ?: preservedUrl
+          val msg = "[FORENSIC][TAB_URL_WRITE_REJECTED] tabId=$tabId attemptedBlankUrl=${updated.url} preservedRealUrl=$preservedUrl caller=$caller"
           Log.w(TAG, msg)
           DebugLogManager.log(msg)
           // Preserve the real URL and title, but allow other safe status updates
-          updated = updated.copy(url = tab.url, title = tab.title)
+          updated = updated.copy(
+            url = preservedUrl,
+            visibleUrl = preservedVisible,
+            lastCommittedUrl = preservedUrl,
+            explicitHomeIntent = false,
+            title = tab.title
+          )
+        } else if (!isBlankTarget) {
+          updated = updated.copy(
+            requestedUrl = updated.requestedUrl ?: updated.url,
+            visibleUrl = updated.url,
+            lastCommittedUrl = updated.url,
+            explicitHomeIntent = false
+          )
+          explicitHomeIntentByTab[tabId] = false
+        } else if (isExplicitHome && isBlankTarget) {
+          updated = updated.copy(
+            requestedUrl = null,
+            visibleUrl = "about:blank",
+            url = "about:blank",
+            explicitHomeIntent = true
+          )
+          explicitHomeIntentByTab[tabId] = true
         }
 
         if (updated != tab) {

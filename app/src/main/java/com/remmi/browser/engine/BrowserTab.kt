@@ -37,4 +37,10 @@ data class BrowserTab(
   val parentTabId: String? = null,
   val openedFromLink: Boolean = false,
   val inTabNavigationCount: Int = 0,
+  val requestedUrl: String? = null,
+  val geckoInternalUrl: String? = null,
+  val lastCommittedUrl: String? = null,
+  val visibleUrl: String = url,
+  val explicitHomeIntent: Boolean = (url.isBlank() || url == "about:blank" || url == "remmi://newtab" || url == "about:home"),
+  val navigationTransactionId: Long = 0L,
 )

@@ -109,6 +109,12 @@ fun BrowserView(
   val tabCallbacks = remember(tab.id, tab.profile) {
     object : GeckoTabCallbacks {
       override fun onUrlChange(url: String) {
+        val isBlank = url.isBlank() || url == "about:blank" || url == "remmi://newtab" || url == "about:home"
+        val hasCommittedReal = !tab.lastCommittedUrl.isNullOrBlank() && tab.lastCommittedUrl != "about:blank" && tab.lastCommittedUrl != "remmi://newtab" && tab.lastCommittedUrl != "about:home"
+        if (isBlank && (!tab.explicitHomeIntent || hasCommittedReal)) {
+          Log.i("BrowserView", "[FORENSIC] SUPPRESS_TRANSIENT_BLANK_CALLBACK tabId=${tab.id} reportedUrl=$url committedUrl=${tab.lastCommittedUrl}")
+          return
+        }
         lastNavigatedUrl = url
         currentOnUrlChange(url)
       }
@@ -277,18 +283,13 @@ fun BrowserView(
     if (tab.url.isBlank()) return@LaunchedEffect
 
     val currentDispatched = geckoEngine.getLastDispatchedUrl(tab.id)
+    val isBlank = tab.url.isBlank() || tab.url == "about:blank" || tab.url == "remmi://newtab" || tab.url == "about:home"
+    val hasExplicitHome = tab.explicitHomeIntent
+    val hasCommittedReal = !tab.lastCommittedUrl.isNullOrBlank() && tab.lastCommittedUrl != "about:blank" && tab.lastCommittedUrl != "remmi://newtab" && tab.lastCommittedUrl != "about:home"
 
     // Do not turn Gecko's transient about:blank lifecycle state into an actual navigation.
-    // During document attach/replacement Gecko can briefly expose about:blank even though the
-    // app's authoritative dispatched URL is still a real page. Resetting to a new-tab URL here
-    // causes the Compose tree to swap and the GeckoView to blink.
-    val isTransientBlankForRealTarget =
-      (tab.url == "about:blank" || tab.url == "remmi://newtab" || tab.url == "about:home" || tab.url.isBlank()) &&
-      !currentDispatched.isNullOrBlank() &&
-      !geckoEngine.isInternalOrIgnoredUrl(currentDispatched) &&
-      currentDispatched != tab.url
-    if (isTransientBlankForRealTarget) {
-      Log.i("BrowserView", "[FORENSIC][SKIP_TRANSIENT_BLANK_LOAD] tabId=${tab.id} tabUrl=${tab.url} dispatchedUrl=$currentDispatched")
+    if (isBlank && (!hasExplicitHome || hasCommittedReal)) {
+      Log.i("BrowserView", "[FORENSIC][SKIP_TRANSIENT_BLANK_LOAD] tabId=${tab.id} tabUrl=${tab.url} committedUrl=${tab.lastCommittedUrl} dispatchedUrl=$currentDispatched")
       return@LaunchedEffect
     }
 
@@ -308,8 +309,10 @@ fun BrowserView(
 
     if (decision == "DISPATCH_LOAD") {
       lastNavigatedUrl = tab.url
-      if (tab.url == "about:blank" || tab.url == "remmi://newtab" || tab.url == "about:home") {
-        geckoEngine.resetToNewTab(tab.id)
+      if (isBlank) {
+        if (hasExplicitHome && !hasCommittedReal) {
+          geckoEngine.resetToNewTab(tab.id)
+        }
       } else {
         geckoEngine.loadUrl(tab.id, tab.url)
       }
