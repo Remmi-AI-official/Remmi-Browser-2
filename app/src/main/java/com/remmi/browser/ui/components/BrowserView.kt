@@ -93,6 +93,40 @@ fun BrowserView(
   var isAttachingOrAttached by remember(tab.id) { mutableStateOf(false) }
   val isViewAttached by geckoEngine.getViewAttachmentState(tab.id).collectAsState()
 
+  val isRealUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
+  val isDocumentRendered by geckoEngine.getDocumentRenderedState(tab.id).collectAsState()
+  var localRendered by remember(tab.id) { mutableStateOf(geckoEngine.isDocumentRendered(tab.id) || !isRealUrl) }
+
+  LaunchedEffect(isDocumentRendered) {
+    if (isDocumentRendered) {
+      localRendered = true
+    }
+  }
+
+  LaunchedEffect(tab.url) {
+    val isReal = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
+    if (isReal) {
+      localRendered = geckoEngine.isDocumentRendered(tab.id)
+    } else {
+      localRendered = true
+    }
+  }
+
+  LaunchedEffect(localRendered, tab.id, tab.url) {
+    if (!localRendered && isRealUrl) {
+      // Safety fallback to unmask view if paint event is delayed or not emitted
+      kotlinx.coroutines.delay(2000L)
+      localRendered = true
+    }
+  }
+
+  val isCovered = isRealUrl && !localRendered && !isDocumentRendered
+  val coverAlpha by animateFloatAsState(
+    targetValue = if (isCovered) 1f else 0f,
+    animationSpec = tween(durationMillis = 150, easing = LinearOutSlowInEasing),
+    label = "gecko_cover_alpha"
+  )
+
   val currentOnUrlChange by rememberUpdatedState(onUrlChange)
   val currentOnTitleChange by rememberUpdatedState(onTitleChange)
   val currentOnProgressChange by rememberUpdatedState(onProgressChange)
@@ -118,6 +152,9 @@ fun BrowserView(
       }
 
       override fun onProgressChange(progress: Int) {
+        if (progress >= 70 && isRealUrl) {
+          localRendered = true
+        }
         if (progress in 1..99) {
           isCurrentlyLoading = true
           progressFloat = (progress.toFloat() / 100f).coerceIn(0.08f, 1f)
@@ -138,6 +175,9 @@ fun BrowserView(
         if (isLoading) {
           if (progressFloat <= 0f) progressFloat = 0.15f
         } else {
+          if (isRealUrl) {
+            localRendered = true
+          }
           progressFloat = 0f
           android.util.Log.i("AppStartup", "STATE_LOG: FIRST_PAGE_STOP (time=${android.os.SystemClock.elapsedRealtime()})")
           // Page load completed, capture preview thumbnail safely if it's a real web page
@@ -147,6 +187,20 @@ fun BrowserView(
               com.remmi.browser.engine.TabThumbnailManager.getInstance(context).captureGeckoView(tab.id, gv)
             }
           }
+        }
+      }
+
+      override fun onFirstContentfulPaint() {
+        localRendered = true
+      }
+
+      override fun onFirstComposite() {
+        localRendered = true
+      }
+
+      override fun onPaintStatusReset() {
+        if (isRealUrl) {
+          localRendered = false
         }
       }
 
@@ -376,6 +430,7 @@ fun BrowserView(
     AndroidView<WebSwipeRefreshLayout>(
       modifier = Modifier
         .fillMaxSize()
+        .alpha(if (isCovered) 0f else 1f)
         .background(ThemeCyber.colors.surface)
         .testTag("gecko_browser_view"),
       factory = { ctx ->
@@ -399,6 +454,7 @@ fun BrowserView(
             tag = tab.id
             swipeLayout.addView(this)
           }
+          alpha = if (isCovered) 0f else 1f
           geckoViewRef = this
         }
         swipeLayout.canScrollUpCallback = {
@@ -416,7 +472,7 @@ fun BrowserView(
 
         val gvId = "0x" + Integer.toHexString(System.identityHashCode(gv))
         val now = android.os.SystemClock.elapsedRealtime()
-        val msg = "[FORENSIC][VIEW_FACTORY] tabId=${tab.id} view=$gvId tag=${gv.tag} url=${tab.url} elapsedRealtime=$now"
+        val msg = "[FORENSIC][VIEW_FACTORY] tabId=${tab.id} view=$gvId tag=${gv.tag} url=${tab.url} isCovered=$isCovered elapsedRealtime=$now"
         android.util.Log.i("BrowserView", msg)
         com.remmi.browser.util.DebugLogManager.log(msg)
 
@@ -451,6 +507,7 @@ fun BrowserView(
           }
         }
         val geckoView = targetGeckoView
+        geckoView.alpha = if (isCovered) 0f else 1f
         geckoViewRef = geckoView
         val prevTag = geckoView.tag as? String
         val isTagMatch = prevTag == tab.id
@@ -458,7 +515,7 @@ fun BrowserView(
         if (com.remmi.browser.BuildConfig.DEBUG) {
           val gvId = "0x" + Integer.toHexString(System.identityHashCode(geckoView))
           val now = android.os.SystemClock.elapsedRealtime()
-          val updateMsg = "[FORENSIC][VIEW_UPDATE] tabId=${tab.id} view=$gvId tag=$prevTag isTagMatch=$isTagMatch url=${tab.url} elapsedRealtime=$now"
+          val updateMsg = "[FORENSIC][VIEW_UPDATE] tabId=${tab.id} view=$gvId tag=$prevTag isTagMatch=$isTagMatch isCovered=$isCovered url=${tab.url} elapsedRealtime=$now"
           android.util.Log.d("BrowserView", updateMsg)
           com.remmi.browser.util.DebugLogManager.log(updateMsg)
         }
@@ -518,5 +575,15 @@ fun BrowserView(
         swipeRefreshRef = null
       },
     )
+
+    // Visual cover overlay: Prevents transient about:blank rendering from flashing before target document begins rendering
+    if (coverAlpha > 0.01f) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .alpha(coverAlpha)
+          .background(ThemeCyber.colors.surface)
+      )
+    }
   }
 }

@@ -68,6 +68,9 @@ interface GeckoTabCallbacks {
   fun onExternalResponse(response: WebResponse) {}
   fun onContextMenu(data: WebContextMenuData) {}
   fun onScrollChanged(scrollX: Int, scrollY: Int, isScrollingDown: Boolean) {}
+  fun onFirstContentfulPaint() {}
+  fun onFirstComposite() {}
+  fun onPaintStatusReset() {}
 }
 
 /**
@@ -260,6 +263,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
   // Guards against duplicate attachView() calls racing from AndroidView/factory and lifecycle ON_RESUME.
   private val attachingTabs = mutableSetOf<String>()
   private val _viewAttachmentStates = mutableMapOf<String, MutableStateFlow<Boolean>>()
+  private val _documentRenderedStates = mutableMapOf<String, MutableStateFlow<Boolean>>()
   private val navGenerations = mutableMapOf<String, Long>()
   private val currentNavIds = mutableMapOf<String, Long>()
   private val navIdCounter = java.util.concurrent.atomic.AtomicLong(1000L)
@@ -750,6 +754,18 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
   fun getViewAttachmentState(tabId: String): StateFlow<Boolean> {
     return _viewAttachmentStates.getOrPut(tabId) { MutableStateFlow(false) }.asStateFlow()
+  }
+
+  fun getDocumentRenderedState(tabId: String): StateFlow<Boolean> {
+    return _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.asStateFlow()
+  }
+
+  fun isDocumentRendered(tabId: String): Boolean {
+    return _documentRenderedStates[tabId]?.value ?: false
+  }
+
+  fun setDocumentRendered(tabId: String, rendered: Boolean) {
+    _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = rendered
   }
 
   fun isViewAttached(tabId: String): Boolean {
@@ -2015,6 +2031,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val oldProg = navProgressStates[tabId] ?: 0
         navLoadingStates[tabId] = true
         navProgressStates[tabId] = 10
+        if (!isInternalOrIgnoredUrl(url) && url != "about:blank") {
+          _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = false
+        }
         logProgressState(tabId, navId, gen, "NAV_START", oldProg, 10, true, true, "page_start")
 
         sessionCallbacks[tabId]?.onLoadingChange(true)
@@ -2135,6 +2154,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val oldProg = navProgressStates[tabId] ?: 0
         navLoadingStates[tabId] = false
         navProgressStates[tabId] = 0
+        if (success && !isAboutBlank) {
+          _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = true
+        }
         logProgressState(tabId, navId, gen, "NAV_STOP", oldProg, 0, false, true, "navigation_complete")
 
         sessionCallbacks[tabId]?.onLoadingChange(false)
@@ -2163,6 +2185,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
         val newProg = maxOf(oldProg, progress.coerceIn(0, 100))
         navProgressStates[tabId] = newProg
+        if (newProg >= 70 && !isInternalOrIgnoredUrl(currUrl) && currUrl != "about:blank") {
+          _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = true
+        }
         logProgressState(tabId, navId, gen, "NAV_PROGRESS", oldProg, newProg, true, true, "progress_update")
 
         if (com.remmi.browser.BuildConfig.DEBUG) {
@@ -2186,6 +2211,42 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
     // Wire Content delegate
     session.contentDelegate = object : GeckoSession.ContentDelegate {
+      override fun onFirstComposite(session: GeckoSession) {
+        if (!isCallbackAuthoritative(tabId, session, "onFirstComposite")) {
+          return
+        }
+        val msg = "[FORENSIC][FIRST_COMPOSITE] tabId=$tabId session=0x${Integer.toHexString(System.identityHashCode(session))} elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
+        Log.i(TAG, msg)
+        com.remmi.browser.util.DebugLogManager.log(msg)
+        _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = true
+        sessionCallbacks[tabId]?.onFirstComposite()
+      }
+
+      override fun onFirstContentfulPaint(session: GeckoSession) {
+        if (!isCallbackAuthoritative(tabId, session, "onFirstContentfulPaint")) {
+          return
+        }
+        val msg = "[FORENSIC][FIRST_CONTENTFUL_PAINT] tabId=$tabId session=0x${Integer.toHexString(System.identityHashCode(session))} elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
+        Log.i(TAG, msg)
+        com.remmi.browser.util.DebugLogManager.log(msg)
+        _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = true
+        sessionCallbacks[tabId]?.onFirstContentfulPaint()
+      }
+
+      override fun onPaintStatusReset(session: GeckoSession) {
+        if (!isCallbackAuthoritative(tabId, session, "onPaintStatusReset")) {
+          return
+        }
+        val msg = "[FORENSIC][PAINT_STATUS_RESET] tabId=$tabId session=0x${Integer.toHexString(System.identityHashCode(session))} elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
+        Log.i(TAG, msg)
+        com.remmi.browser.util.DebugLogManager.log(msg)
+        val activeDispatched = lastDispatchedUrls[tabId]
+        if (!activeDispatched.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatched)) {
+          _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = false
+        }
+        sessionCallbacks[tabId]?.onPaintStatusReset()
+      }
+
       override fun onCrash(session: GeckoSession) {
         if (!isCallbackAuthoritative(tabId, session, "onCrash")) {
           return
@@ -2447,14 +2508,22 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val sessId = "0x" + Integer.toHexString(System.identityHashCode(session))
     val view = attachedViews[tabId]
     val viewId = view?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
-    val currUrl = lastObservedUrls[tabId]?.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("remmi://") }
-      ?: TabManager.getInstance().getTab(tabId)?.url?.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("remmi://") }
-      ?: lastDispatchedUrls[tabId]?.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("remmi://") }
-      ?: ""
+    val rawIntendedUrl = lastDispatchedUrls[tabId] ?: lastObservedUrls[tabId] ?: TabManager.getInstance().getTab(tabId)?.url ?: ""
+    val isIntentionalBlank = rawIntendedUrl.isBlank() || rawIntendedUrl == "about:blank" || rawIntendedUrl.startsWith("remmi://")
+    
+    val currUrl = if (isIntentionalBlank) {
+        rawIntendedUrl
+    } else {
+        lastDispatchedUrls[tabId]?.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("remmi://") }
+          ?: lastObservedUrls[tabId]?.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("remmi://") }
+          ?: TabManager.getInstance().getTab(tabId)?.url?.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("remmi://") }
+          ?: ""
+    }
+
     val gen = navGenerations[tabId] ?: 0L
     val now = android.os.SystemClock.elapsedRealtime()
 
-    if (currUrl.isNotBlank()) {
+    if (currUrl.isNotBlank() && !isIntentionalBlank) {
       lastDispatchedUrls[tabId] = currUrl
     }
 
@@ -2840,21 +2909,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
       val skipMsg = "[FORENSIC] [GECKO_VIEW_ATTACH_RESUME] tabId=$tabId session=$existingSessId view=$viewId gen=$gen reason=idempotency_match elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
       Log.i(TAG, skipMsg)
       com.remmi.browser.util.DebugLogManager.log(skipMsg)
-      
-      existingSession.setActive(true)
-      _viewAttachmentStates.getOrPut(tabId) { MutableStateFlow(false) }.value = true
-
-      if (!existingSession.isOpen && existingSession !in pendingGeckoOpenSessions) {
-        openSessionSafely(existingSession, tabId, "attachView:RESUME_UNOPENED")
-      }
-
-      val currentNav = sessionNavStates[tabId]
-      if (currentNav != null) {
-        callbacks.onNavStateChange(currentNav.first, currentNav.second)
-      }
-      dispatchPendingNavigationIfReady(tabId)
-      resumePendingContentRecoveryIfAny(tabId)
-      checkViewInvariants(tabId, "ATTACH_SKIP_IDEMPOTENT")
       return@withContext
     }
 
@@ -3111,6 +3165,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
     }
 
     lastDispatchedUrls[tabId] = targetUrl
+    if (!isInternalOrIgnoredUrl(targetUrl) && targetUrl != "about:blank") {
+      _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(false) }.value = false
+    }
     pendingNavigations.remove(tabId)
     dispatchedNavigationsHistory.getOrPut(tabId) { mutableListOf() }.add(targetUrl)
     val dispatchMsg = "[FORENSIC] [GECKO_NAV_DISPATCH] tabId=$tabId session=$currentSessId view=$currentViewId navId=$navId gen=$gen url=$targetUrl thread=$threadName"
@@ -3307,6 +3364,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       } catch (_: Exception) {}
     }
     _viewAttachmentStates.remove(tabId)
+    _documentRenderedStates.remove(tabId)
     pendingNavigations.remove(tabId)
     pendingContentRecoveries.remove(tabId)
     val activeRecovery = activeRecoveries.remove(tabId)
@@ -3362,6 +3420,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     }
     geckoViewPool.clear()
     _viewAttachmentStates.clear()
+    _documentRenderedStates.clear()
     pendingNavigations.clear()
     pendingContentRecoveries.clear()
     activeRecoveries.values.forEach { it.timeoutRunnable?.let { r -> mainHandler.removeCallbacks(r) } }
