@@ -280,7 +280,7 @@ fun BrowserScreen(
   val homeRequestedByTab = remember { mutableStateMapOf<String, Boolean>() }
   val backToHomePendingByTab = remember { mutableStateMapOf<String, Boolean>() }
   val activeTabIsBlank = activeTab.url.isBlank() || activeTab.url == "about:blank" || activeTab.url == "remmi://newtab" || activeTab.url == "about:home"
-  val isNewTab = (homeRequestedByTab[activeTab.id] == true || (activeTab.explicitHomeIntent && homeRequestedByTab[activeTab.id] != false)) && (activeTabIsBlank || activeTab.lastCommittedUrl.isNullOrBlank())
+  val isNewTab = activeTabIsBlank && homeRequestedByTab[activeTab.id] != false
 
   SideEffect {
     tabManager.recordRecomposition(activeTab.id)
@@ -692,7 +692,6 @@ fun BrowserScreen(
       } else if (!isNewTab) {
         Log.i("BrowserScreen", "[FORENSIC] NAV_BACK_NO_HISTORY tabId=${activeTab.id} action=RESET_TO_NEW_TAB url=${activeTab.url}")
         homeRequestedByTab[activeTab.id] = true
-        tabManager.setExplicitHomeIntent(activeTab.id, true)
         backToHomePendingByTab.remove(activeTab.id)
         // If on a loaded website with no back history in session, go back to New Tab page
         tabManager.updateTab(activeTab.id) {
@@ -979,7 +978,6 @@ fun BrowserScreen(
                 }
                 val targetUrl = String.format(engine.searchUrlFormat, encoded)
                 homeRequestedByTab[activeTab.id] = false
-                tabManager.setExplicitHomeIntent(activeTab.id, false)
                 backToHomePendingByTab.remove(activeTab.id)
                 tabManager.updateTab(activeTab.id) {
                   it.copy(url = targetUrl, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
@@ -989,7 +987,6 @@ fun BrowserScreen(
               onNavigate = { target ->
                 val sanitized = NetworkHardening.sanitizeUrl(target)
                 homeRequestedByTab[activeTab.id] = false
-                tabManager.setExplicitHomeIntent(activeTab.id, false)
                 backToHomePendingByTab.remove(activeTab.id)
                 tabManager.updateTab(activeTab.id) {
                   it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
@@ -1057,26 +1054,22 @@ fun BrowserScreen(
                       val currentTab = tabManager.getTab(tabId) ?: activeTab
                       val isBlank = newUrl.isBlank() || newUrl == "about:blank" || newUrl == "remmi://newtab" || newUrl == "about:home"
                       val currentTabIsReal = currentTab.url.isNotBlank() && currentTab.url != "about:blank" && currentTab.url != "remmi://newtab" && currentTab.url != "about:home"
-                      val hasCommittedReal = !currentTab.lastCommittedUrl.isNullOrBlank() && currentTab.lastCommittedUrl != "about:blank" && currentTab.lastCommittedUrl != "remmi://newtab" && currentTab.lastCommittedUrl != "about:home"
-                      val hasExplicitHome = tabManager.hasExplicitHomeIntent(tabId) || currentTab.explicitHomeIntent
 
-                      if (isBlank && (!hasExplicitHome || currentTabIsReal || hasCommittedReal) && backToHomePendingByTab[tabId] != true) {
+                      if (isBlank && currentTabIsReal && backToHomePendingByTab[tabId] != true) {
                         // Gecko may report a transient about:blank while a real document is being
                         // attached/replaced. Never turn that renderer state into a Compose home-page swap.
-                        Log.i("BrowserScreen", "[FORENSIC] SUPPRESS_TRANSIENT_BLANK_URL tabId=$tabId currentUrl=${currentTab.url} committedUrl=${currentTab.lastCommittedUrl}")
+                        Log.i("BrowserScreen", "[FORENSIC] SUPPRESS_TRANSIENT_BLANK_URL tabId=$tabId currentUrl=${currentTab.url}")
                         return@BrowserView
                       }
 
                       if (isBlank) {
                         // This blank is an explicit home/back-to-home transition.
                         homeRequestedByTab[tabId] = true
-                        tabManager.setExplicitHomeIntent(tabId, true)
                         backToHomePendingByTab.remove(tabId)
                       } else {
                         // First real navigation permanently keeps the Gecko surface mounted for
                         // transient blank callbacks during this tab's browsing lifetime.
                         homeRequestedByTab[tabId] = false
-                        tabManager.setExplicitHomeIntent(tabId, false)
                         backToHomePendingByTab.remove(tabId)
                       }
 
@@ -1421,7 +1414,6 @@ fun BrowserScreen(
               } else if (!isNewTab) {
                 Log.i("BrowserScreen", "[FORENSIC] NAV_BACK_TOOLBAR tabId=${activeTab.id} action=RESET_TO_NEW_TAB")
                 homeRequestedByTab[activeTab.id] = true
-                tabManager.setExplicitHomeIntent(activeTab.id, true)
                 backToHomePendingByTab.remove(activeTab.id)
                 tabManager.updateTab(activeTab.id) {
                   it.copy(url = "about:blank", title = "New Tab", canGoBack = false, canGoForward = false, isReaderMode = false, isSecure = true, readerArticle = null, isLoading = false, progress = 0)
@@ -1474,7 +1466,6 @@ fun BrowserScreen(
           IconButton(
             onClick = {
               homeRequestedByTab[activeTab.id] = true
-              tabManager.setExplicitHomeIntent(activeTab.id, true)
               backToHomePendingByTab.remove(activeTab.id)
               tabManager.updateTab(activeTab.id) {
                 it.copy(
@@ -2380,7 +2371,6 @@ fun BrowserScreen(
     ReadingListScreen(
       onOpenUrl = { url ->
         homeRequestedByTab[activeTab.id] = false
-        tabManager.setExplicitHomeIntent(activeTab.id, false)
         backToHomePendingByTab.remove(activeTab.id)
         tabManager.updateTab(activeTab.id) { it.copy(url = url, isReaderMode = false, readerArticle = null) }
         showReadingListScreen = false
@@ -2581,7 +2571,6 @@ fun BrowserScreen(
         detectedClickCandidates = emptyList()
         if (RedirectInspector.isSchemeSafeForNavigation(finalUrl)) {
           homeRequestedByTab[activeTab.id] = false
-          tabManager.setExplicitHomeIntent(activeTab.id, false)
           backToHomePendingByTab.remove(activeTab.id)
           tabManager.updateTab(activeTab.id) { it.copy(url = finalUrl, isReaderMode = false, readerArticle = null) }
           geckoEngine.loadUrl(activeTab.id, finalUrl)
@@ -2601,7 +2590,6 @@ fun BrowserScreen(
         val targetUrl = candidate.cleanUrl
         if (RedirectInspector.isSchemeSafeForNavigation(targetUrl)) {
           homeRequestedByTab[activeTab.id] = false
-          tabManager.setExplicitHomeIntent(activeTab.id, false)
           backToHomePendingByTab.remove(activeTab.id)
           tabManager.updateTab(activeTab.id) { it.copy(url = targetUrl, isReaderMode = false, readerArticle = null) }
           geckoEngine.loadUrl(activeTab.id, targetUrl)
@@ -2653,7 +2641,6 @@ fun BrowserScreen(
       onOpen = { url ->
         inspectingLinkData = null
         homeRequestedByTab[activeTab.id] = false
-        tabManager.setExplicitHomeIntent(activeTab.id, false)
         backToHomePendingByTab.remove(activeTab.id)
         tabManager.updateTab(activeTab.id) { it.copy(url = url, isReaderMode = false, readerArticle = null) }
         geckoEngine.loadUrl(activeTab.id, url)
