@@ -838,335 +838,336 @@ fun BrowserScreen(
                 (isWaitingForTor || (activeTab.profile == PrivacyProfile.GHOST && (torState is TorManager.TorState.OFF || torState.isConnecting))) &&
                 torState !is TorManager.TorState.FAILED
 
-            if (shouldShowTorOverlay) {
-          val progress = torState.progress
-          val statusMsg = torState.statusText
-
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .background(ThemeCyber.colors.background)
-              .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            androidx.compose.material3.CircularProgressIndicator(
-              color = ThemeCyber.colors.torPurple,
-              modifier = Modifier.size(48.dp)
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(20.dp))
-            GlitchText(
-              text = "ESTABLISHING SECURE CIRCUIT...",
-              fontSize = 16.sp,
-              color = ThemeCyber.colors.torPurple
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(10.dp))
-            Text(
-              text = if (progress > 0) "$progress% • $statusMsg" else statusMsg,
-              color = ThemeCyber.colors.textSecondary,
-              fontFamily = CyberMonoFamily,
-              fontSize = 12.sp,
-              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
-            androidx.compose.material3.LinearProgressIndicator(
-              progress = { progress.coerceAtLeast(10) / 100f },
-              color = ThemeCyber.colors.torPurple,
-              trackColor = ThemeCyber.colors.surfaceLight,
-              modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
-            Text(
-              text = "FAIL-CLOSED ACTIVE: Direct clearnet traffic is strictly blocked to prevent IP/location leak.",
-              color = ThemeCyber.colors.textMuted,
-              fontFamily = CyberMonoFamily,
-              fontSize = 10.sp,
-              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-          }
-        } else if (activeTab.profile == PrivacyProfile.GHOST && torState is TorManager.TorState.FAILED) {
-          val failedState = torState as TorManager.TorState.FAILED
-          val errorMsg = "[${failedState.category}] ${failedState.message}"
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .background(ThemeCyber.colors.background)
-              .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            Icon(
-              imageVector = Icons.Default.Shield,
-              contentDescription = "Tor Error",
-              tint = ThemeCyber.colors.warningYellow,
-              modifier = Modifier.size(54.dp)
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
-            GlitchText(
-              text = "TOR CIRCUIT CONNECTION FAILED",
-              fontSize = 16.sp,
-              color = ThemeCyber.colors.warningYellow
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(10.dp))
-            Text(
-              text = errorMsg,
-              color = ThemeCyber.colors.textSecondary,
-              fontFamily = CyberMonoFamily,
-              fontSize = 12.sp,
-              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              text = "FAIL-CLOSED DEFENSE: Clearnet fallback is blocked to protect your real IP address.",
-              color = ThemeCyber.colors.torPurple,
-              fontFamily = CyberMonoFamily,
-              fontSize = 11.sp,
-              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
-              Button(
-                onClick = {
-                  scope.launch {
-                    privacyController.resetTorFailures()
-                    privacyController.enterGhostMode(activeTab.id)
+            // 1. Base Layer: Keep the browser surface continuously attached during privacy profile transitions
+            if (isNewTab) {
+              NewTabPage(
+                profile = activeTab.profile,
+                blockedTrackersCount = activeTab.blockedTrackersCount,
+                torState = torState,
+                circuit = circuit,
+                isDesktopMode = activeTab.isDesktopMode,
+                isReaderMode = activeTab.isReaderMode,
+                searchEngine = SearchEngine.fromId(settings.searchEngineName),
+                speedDials = speedDials,
+                backgroundAnimation = settings.backgroundAnimation,
+                customWallpaperUri = settings.customWallpaperUri,
+                wallpaperDimLevel = settings.wallpaperDimLevel,
+                fullscreenWallpaperEnabled = settings.fullscreenWallpaperEnabled,
+                wallpaperScaleMode = settings.wallpaperScaleMode,
+                onSearch = { query, engine ->
+                  val encoded = try {
+                    URLEncoder.encode(query, "UTF-8")
+                  } catch (e: Exception) {
+                    query
+                  }
+                  val targetUrl = String.format(engine.searchUrlFormat, encoded)
+                  homeRequestedByTab[activeTab.id] = false
+                  backToHomePendingByTab.remove(activeTab.id)
+                  tabManager.updateTab(activeTab.id) {
+                    it.copy(url = targetUrl, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                  }
+                  geckoEngine.loadUrl(activeTab.id, targetUrl)
+                },
+                onNavigate = { target ->
+                  val sanitized = NetworkHardening.sanitizeUrl(target)
+                  homeRequestedByTab[activeTab.id] = false
+                  backToHomePendingByTab.remove(activeTab.id)
+                  tabManager.updateTab(activeTab.id) {
+                    it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                  }
+                  geckoEngine.loadUrl(activeTab.id, sanitized)
+                },
+                onSelectSearchEngine = { engine ->
+                  settingsRepo.updateSearchEngine(engine.displayName)
+                },
+                onSelectTheme = { theme ->
+                  settingsRepo.updateCyberTheme(theme)
+                },
+                onAddSpeedDial = { item -> settingsRepo.addSpeedDial(item) },
+                onEditSpeedDial = { item -> settingsRepo.editSpeedDial(item) },
+                onDeleteSpeedDial = { id -> settingsRepo.removeSpeedDial(id) },
+                onResetSpeedDials = { settingsRepo.resetSpeedDials() },
+                onUpdateWallpaper = { uri -> settingsRepo.updateCustomWallpaper(uri) },
+                onUpdateBackgroundAnimation = { type -> settingsRepo.updateBackgroundAnimation(type) },
+                onUpdateWallpaperDimLevel = { settingsRepo.updateWallpaperDimLevel(it) },
+                onUpdateFullscreenWallpaper = { settingsRepo.updateFullscreenWallpaper(it) },
+                onUpdateWallpaperScaleMode = { settingsRepo.updateWallpaperScaleMode(it) },
+                onNewTab = {
+                  val targetProfile = if (activeTab.profile == PrivacyProfile.GHOST || settings.defaultProfile == PrivacyProfile.GHOST) PrivacyProfile.GHOST else PrivacyProfile.SHIELD
+                  if (targetProfile == PrivacyProfile.GHOST) {
+                    handleOpenGhostTab("about:blank")
+                  } else {
+                    tabManager.openTab(
+                      profile = targetProfile,
+                      isDesktop = settings.defaultDesktopMode,
+                    )
                   }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.torPurple),
-                shape = RoundedCornerShape(6.dp),
-              ) {
-                Text("RETRY", fontFamily = CyberMonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-              }
-              if (torManager.isOrbotInstalled()) {
-                Button(
-                  onClick = {
-                    torManager.getOrbotStartIntent()?.let { intent ->
-                      context.startActivity(intent)
-                    }
-                  },
-                  colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.primary),
+                onOpenBookmarks = {
+                  historyBookmarksInitialTab = 1
+                  showHistoryBookmarksSheet = true
+                },
+                onOpenHistory = {
+                  historyBookmarksInitialTab = 0
+                  showHistoryBookmarksSheet = true
+                },
+                onOpenDownloads = { showDownloadsSheet = true },
+                onOpenReadingList = { showReadingListScreen = true },
+                onOpenSettings = onOpenSettings,
+                onToggleDesktop = { tabManager.toggleDesktopMode(activeTab.id) },
+                onToggleGhost = handleToggleGhostMode,
+                onToggleReader = { tabManager.toggleReaderMode(activeTab.id) },
+                onInspectCircuit = { showCircuitSheet = true },
+                onSecurityShieldClick = {
+                  if (CurrentTorRoute.isReady || torState is TorManager.TorState.READY || activeTab.profile == PrivacyProfile.GHOST) {
+                    showCircuitSheet = true
+                  } else {
+                    showSecuritySheet = true
+                  }
+                },
+                modifier = Modifier.fillMaxSize()
+              )
+            } else {
+              Box(modifier = Modifier.fillMaxSize()) {
+                if (isSessionRestored) {
+                  key(activeTab.id) {
+                    BrowserView(
+                      tab = activeTab,
+                      onUrlChange = { newUrl ->
+                        val tabId = activeTab.id
+                        val currentTab = tabManager.getTab(tabId) ?: activeTab
+                        val isBlank = newUrl.isBlank() || newUrl == "about:blank" || newUrl == "remmi://newtab" || newUrl == "about:home"
+                        val currentTabIsReal = currentTab.url.isNotBlank() && currentTab.url != "about:blank" && currentTab.url != "remmi://newtab" && currentTab.url != "about:home"
 
-                  shape = RoundedCornerShape(6.dp),
-                ) {
-                  Text("OPEN ORBOT", color = ThemeCyber.colors.backgroundDarker, fontFamily = CyberMonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-              }
-              Button(
-                onClick = handleToggleGhostMode,
-                colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.surfaceLight),
-                shape = RoundedCornerShape(6.dp),
-              ) {
-                Text("SHIELD MODE", color = ThemeCyber.colors.textPrimary, fontFamily = CyberMonoFamily, fontSize = 12.sp)
-              }
-            }
-
-          }
-        } else {
-          if (isNewTab) {
-            NewTabPage(
-              profile = activeTab.profile,
-              blockedTrackersCount = activeTab.blockedTrackersCount,
-              torState = torState,
-              circuit = circuit,
-              isDesktopMode = activeTab.isDesktopMode,
-              isReaderMode = activeTab.isReaderMode,
-              searchEngine = SearchEngine.fromId(settings.searchEngineName),
-              speedDials = speedDials,
-              backgroundAnimation = settings.backgroundAnimation,
-              customWallpaperUri = settings.customWallpaperUri,
-              wallpaperDimLevel = settings.wallpaperDimLevel,
-              fullscreenWallpaperEnabled = settings.fullscreenWallpaperEnabled,
-              wallpaperScaleMode = settings.wallpaperScaleMode,
-              onSearch = { query, engine ->
-                val encoded = try {
-                  URLEncoder.encode(query, "UTF-8")
-                } catch (e: Exception) {
-                  query
-                }
-                val targetUrl = String.format(engine.searchUrlFormat, encoded)
-                homeRequestedByTab[activeTab.id] = false
-                backToHomePendingByTab.remove(activeTab.id)
-                tabManager.updateTab(activeTab.id) {
-                  it.copy(url = targetUrl, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
-                }
-                geckoEngine.loadUrl(activeTab.id, targetUrl)
-              },
-              onNavigate = { target ->
-                val sanitized = NetworkHardening.sanitizeUrl(target)
-                homeRequestedByTab[activeTab.id] = false
-                backToHomePendingByTab.remove(activeTab.id)
-                tabManager.updateTab(activeTab.id) {
-                  it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
-                }
-                geckoEngine.loadUrl(activeTab.id, sanitized)
-              },
-              onSelectSearchEngine = { engine ->
-                settingsRepo.updateSearchEngine(engine.displayName)
-              },
-              onSelectTheme = { theme ->
-                settingsRepo.updateCyberTheme(theme)
-              },
-              onAddSpeedDial = { item -> settingsRepo.addSpeedDial(item) },
-              onEditSpeedDial = { item -> settingsRepo.editSpeedDial(item) },
-              onDeleteSpeedDial = { id -> settingsRepo.removeSpeedDial(id) },
-              onResetSpeedDials = { settingsRepo.resetSpeedDials() },
-              onUpdateWallpaper = { uri -> settingsRepo.updateCustomWallpaper(uri) },
-              onUpdateBackgroundAnimation = { type -> settingsRepo.updateBackgroundAnimation(type) },
-              onUpdateWallpaperDimLevel = { settingsRepo.updateWallpaperDimLevel(it) },
-              onUpdateFullscreenWallpaper = { settingsRepo.updateFullscreenWallpaper(it) },
-              onUpdateWallpaperScaleMode = { settingsRepo.updateWallpaperScaleMode(it) },
-              onNewTab = {
-                val targetProfile = if (activeTab.profile == PrivacyProfile.GHOST || settings.defaultProfile == PrivacyProfile.GHOST) PrivacyProfile.GHOST else PrivacyProfile.SHIELD
-                if (targetProfile == PrivacyProfile.GHOST) {
-                  handleOpenGhostTab("about:blank")
-                } else {
-                  tabManager.openTab(
-                    profile = targetProfile,
-                    isDesktop = settings.defaultDesktopMode,
-                  )
-                }
-              },
-              onOpenBookmarks = {
-                historyBookmarksInitialTab = 1
-                showHistoryBookmarksSheet = true
-              },
-              onOpenHistory = {
-                historyBookmarksInitialTab = 0
-                showHistoryBookmarksSheet = true
-              },
-              onOpenDownloads = { showDownloadsSheet = true },
-              onOpenReadingList = { showReadingListScreen = true },
-              onOpenSettings = onOpenSettings,
-              onToggleDesktop = { tabManager.toggleDesktopMode(activeTab.id) },
-              onToggleGhost = handleToggleGhostMode,
-              onToggleReader = { tabManager.toggleReaderMode(activeTab.id) },
-              onInspectCircuit = { showCircuitSheet = true },
-              onSecurityShieldClick = {
-                if (CurrentTorRoute.isReady || torState is TorManager.TorState.READY || activeTab.profile == PrivacyProfile.GHOST) {
-                  showCircuitSheet = true
-                } else {
-                  showSecuritySheet = true
-                }
-              },
-              modifier = Modifier.fillMaxSize()
-            )
-          } else {
-            Box(modifier = Modifier.fillMaxSize()) {
-              if (isSessionRestored) {
-                key(activeTab.id) {
-                  BrowserView(
-                    tab = activeTab,
-                    onUrlChange = { newUrl ->
-                      val tabId = activeTab.id
-                      val currentTab = tabManager.getTab(tabId) ?: activeTab
-                      val isBlank = newUrl.isBlank() || newUrl == "about:blank" || newUrl == "remmi://newtab" || newUrl == "about:home"
-                      val currentTabIsReal = currentTab.url.isNotBlank() && currentTab.url != "about:blank" && currentTab.url != "remmi://newtab" && currentTab.url != "about:home"
-
-                      if (isBlank && currentTabIsReal && backToHomePendingByTab[tabId] != true) {
-                        // Gecko may report a transient about:blank while a real document is being
-                        // attached/replaced. Never turn that renderer state into a Compose home-page swap.
-                        Log.i("BrowserScreen", "[FORENSIC] SUPPRESS_TRANSIENT_BLANK_URL tabId=$tabId currentUrl=${currentTab.url}")
-                        return@BrowserView
-                      }
-
-                      if (isBlank) {
-                        // This blank is an explicit home/back-to-home transition.
-                        homeRequestedByTab[tabId] = true
-                        backToHomePendingByTab.remove(tabId)
-                      } else {
-                        // First real navigation permanently keeps the Gecko surface mounted for
-                        // transient blank callbacks during this tab's browsing lifetime.
-                        homeRequestedByTab[tabId] = false
-                        backToHomePendingByTab.remove(tabId)
-                      }
-
-                      tabManager.updateTab(tabId) { tab ->
-                        if (tab.url != newUrl) {
-                          tab.copy(
-                            url = newUrl,
-                            title = if (isBlank) "New Tab" else tab.title,
-                            isSecure = if (isBlank) true else tab.isSecure,
-                            isReaderMode = false,
-                            readerArticle = null
-                          )
-                        } else {
-                          tab
+                        if (isBlank && currentTabIsReal && backToHomePendingByTab[tabId] != true) {
+                          // Gecko may report a transient about:blank while a real document is being
+                          // attached/replaced. Never turn that renderer state into a Compose home-page swap.
+                          Log.i("BrowserScreen", "[FORENSIC] SUPPRESS_TRANSIENT_BLANK_URL tabId=$tabId currentUrl=${currentTab.url}")
+                          return@BrowserView
                         }
-                      }
 
-                      if (!isBlank && currentTab.profile != PrivacyProfile.GHOST && currentTab.profile != PrivacyProfile.INCOGNITO) {
-                        scope.launch(Dispatchers.IO) {
-                          val db = RemmiDatabase.getDatabaseAsync(context)
-                          db.historyDao().insertIfNotDuplicate(
-                            HistoryItem(
+                        if (isBlank) {
+                          // This blank is an explicit home/back-to-home transition.
+                          homeRequestedByTab[tabId] = true
+                          backToHomePendingByTab.remove(tabId)
+                        } else {
+                          // First real navigation permanently keeps the Gecko surface mounted for
+                          // transient blank callbacks during this tab's browsing lifetime.
+                          homeRequestedByTab[tabId] = false
+                          backToHomePendingByTab.remove(tabId)
+                        }
+
+                        tabManager.updateTab(tabId) { tab ->
+                          if (tab.url != newUrl) {
+                            tab.copy(
                               url = newUrl,
-                              title = currentTab.title,
-                              profile = currentTab.profile.name
+                              title = if (isBlank) "New Tab" else tab.title,
+                              isSecure = if (isBlank) true else tab.isSecure,
+                              isReaderMode = false,
+                              readerArticle = null
                             )
-                          )
+                          } else {
+                            tab
+                          }
                         }
-                      }
-                    },
-                    onTitleChange = { newTitle ->
-                      tabManager.updateTab(activeTab.id) { it.copy(title = newTitle) }
-                    },
-                    onProgressChange = { progress ->
-                      tabManager.updateTab(activeTab.id) {
-                        if (it.progress != progress) {
+
+                        if (!isBlank && currentTab.profile != PrivacyProfile.GHOST && currentTab.profile != PrivacyProfile.INCOGNITO) {
+                          scope.launch(Dispatchers.IO) {
+                            val db = RemmiDatabase.getDatabaseAsync(context)
+                            db.historyDao().insertIfNotDuplicate(
+                              HistoryItem(
+                                url = newUrl,
+                                title = currentTab.title,
+                                profile = currentTab.profile.name
+                              )
+                            )
+                          }
+                        }
+                      },
+                      onTitleChange = { newTitle ->
+                        tabManager.updateTab(activeTab.id) { it.copy(title = newTitle) }
+                      },
+                      onProgressChange = { progress ->
+                        tabManager.updateTab(activeTab.id) {
+                          if (it.progress != progress) {
+                            it.copy(
+                              progress = progress,
+                              isLoading = if (progress in 1..99) true else if (progress >= 100) false else it.isLoading
+                            )
+                          } else it
+                        }
+                      },
+                      onLoadingChange = { loading ->
+                        tabManager.updateTab(activeTab.id) {
                           it.copy(
-                            progress = progress,
-                            isLoading = if (progress in 1..99) true else if (progress >= 100) false else it.isLoading
+                            isLoading = loading,
+                            progress = if (loading && it.progress <= 0) 15 else if (!loading) 0 else it.progress
                           )
-                        } else it
-                      }
-                    },
-                    onLoadingChange = { loading ->
-                      tabManager.updateTab(activeTab.id) {
-                        it.copy(
-                          isLoading = loading,
-                          progress = if (loading && it.progress <= 0) 15 else if (!loading) 0 else it.progress
-                        )
-                      }
-                    },
-                    onSecurityChange = { secure ->
-                      if (activeTab.isSecure != secure) {
-                        tabManager.updateTab(activeTab.id) { it.copy(isSecure = secure) }
-                      }
-                    },
-                    onNavStateChange = { canBack, canForward ->
-                      tabManager.updateTab(activeTab.id) { tab ->
-                        if (tab.canGoBack != canBack || tab.canGoForward != canForward) {
-                          tab.copy(canGoBack = canBack, canGoForward = canForward)
-                        } else {
-                          tab
                         }
-                      }
-                    },
-                    onTrackerBlocked = { url, _ ->
-                      tabManager.incrementTrackerCount(activeTab.id, url)
-                    },
-                    onScrollChange = { _ ->
-                      // Keep viewport stable for 120Hz/60Hz buttery-smooth Gecko hardware-accelerated scrolling
-                    },
-                    onReaderArticleExtracted = { article ->
-                      tabManager.setReaderArticle(activeTab.id, article)
-                    },
-                    onContextMenuRequested = { data ->
-                      activeContextMenuData = data
-                    },
-                    onDownloadRequested = { req ->
-                      activeDownloadConfirmation = req
-                    },
-                    modifier = Modifier.fillMaxSize()
-                  )
+                      },
+                      onSecurityChange = { secure ->
+                        if (activeTab.isSecure != secure) {
+                          tabManager.updateTab(activeTab.id) { it.copy(isSecure = secure) }
+                        }
+                      },
+                      onNavStateChange = { canBack, canForward ->
+                        tabManager.updateTab(activeTab.id) { tab ->
+                          if (tab.canGoBack != canBack || tab.canGoForward != canForward) {
+                            tab.copy(canGoBack = canBack, canGoForward = canForward)
+                          } else {
+                            tab
+                          }
+                        }
+                      },
+                      onTrackerBlocked = { url, _ ->
+                        tabManager.incrementTrackerCount(activeTab.id, url)
+                      },
+                      onScrollChange = { _ ->
+                        // Keep viewport stable for 120Hz/60Hz buttery-smooth Gecko hardware-accelerated scrolling
+                      },
+                      onReaderArticleExtracted = { article ->
+                        tabManager.setReaderArticle(activeTab.id, article)
+                      },
+                      onContextMenuRequested = { data ->
+                        activeContextMenuData = data
+                      },
+                      onDownloadRequested = { req ->
+                        activeDownloadConfirmation = req
+                      },
+                      modifier = Modifier.fillMaxSize()
+                    )
+                  }
                 }
               }
             }
-          }
-        }
+
+            // 2. Overlay Layer: Kept smoothly layered over intact surface during privacy transitions
+            if (shouldShowTorOverlay) {
+              val progress = torState.progress
+              val statusMsg = torState.statusText
+
+              Column(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .background(ThemeCyber.colors.background.copy(alpha = if (isNewTab) 1f else 0.94f))
+                  .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                  color = ThemeCyber.colors.torPurple,
+                  modifier = Modifier.size(48.dp)
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(20.dp))
+                GlitchText(
+                  text = "ESTABLISHING SECURE CIRCUIT...",
+                  fontSize = 16.sp,
+                  color = ThemeCyber.colors.torPurple
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                  text = if (progress > 0) "$progress% • $statusMsg" else statusMsg,
+                  color = ThemeCyber.colors.textSecondary,
+                  fontFamily = CyberMonoFamily,
+                  fontSize = 12.sp,
+                  textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                androidx.compose.material3.LinearProgressIndicator(
+                  progress = { progress.coerceAtLeast(10) / 100f },
+                  color = ThemeCyber.colors.torPurple,
+                  trackColor = ThemeCyber.colors.surfaceLight,
+                  modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                  text = "FAIL-CLOSED ACTIVE: Direct clearnet traffic is strictly blocked to prevent IP/location leak.",
+                  color = ThemeCyber.colors.textMuted,
+                  fontFamily = CyberMonoFamily,
+                  fontSize = 10.sp,
+                  textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+              }
+            } else if (activeTab.profile == PrivacyProfile.GHOST && torState is TorManager.TorState.FAILED) {
+              val failedState = torState as TorManager.TorState.FAILED
+              val errorMsg = "[${failedState.category}] ${failedState.message}"
+              Column(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .background(ThemeCyber.colors.background.copy(alpha = if (isNewTab) 1f else 0.95f))
+                  .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Shield,
+                  contentDescription = "Tor Error",
+                  tint = ThemeCyber.colors.warningYellow,
+                  modifier = Modifier.size(54.dp)
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                GlitchText(
+                  text = "TOR CIRCUIT CONNECTION FAILED",
+                  fontSize = 16.sp,
+                  color = ThemeCyber.colors.warningYellow
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                  text = errorMsg,
+                  color = ThemeCyber.colors.textSecondary,
+                  fontFamily = CyberMonoFamily,
+                  fontSize = 12.sp,
+                  textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                  text = "FAIL-CLOSED DEFENSE: Clearnet fallback is blocked to protect your real IP address.",
+                  color = ThemeCyber.colors.torPurple,
+                  fontFamily = CyberMonoFamily,
+                  fontSize = 11.sp,
+                  textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(24.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+                  Button(
+                    onClick = {
+                      scope.launch {
+                        privacyController.resetTorFailures()
+                        privacyController.enterGhostMode(activeTab.id)
+                      }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.torPurple),
+                    shape = RoundedCornerShape(6.dp),
+                  ) {
+                    Text("RETRY", fontFamily = CyberMonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  }
+                  if (torManager.isOrbotInstalled()) {
+                    Button(
+                      onClick = {
+                        torManager.getOrbotStartIntent()?.let { intent ->
+                          context.startActivity(intent)
+                        }
+                      },
+                      colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.primary),
+
+                      shape = RoundedCornerShape(6.dp),
+                    ) {
+                      Text("OPEN ORBOT", color = ThemeCyber.colors.backgroundDarker, fontFamily = CyberMonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                  }
+                  Button(
+                    onClick = handleToggleGhostMode,
+                    colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.surfaceLight),
+                    shape = RoundedCornerShape(6.dp),
+                  ) {
+                    Text("SHIELD MODE", color = ThemeCyber.colors.textPrimary, fontFamily = CyberMonoFamily, fontSize = 12.sp)
+                  }
+                }
+              }
+            }
 
         // Reader Mode Fullscreen View
         if (activeTab.isReaderMode) {

@@ -195,9 +195,12 @@ class TabThumbnailManager private constructor(private val context: Context) {
     val sessId = session?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
     val gvId = "0x" + Integer.toHexString(System.identityHashCode(geckoView))
     val isOpen = session?.isOpen == true
+    val isAttached = geckoView.isAttachedToWindow && geckoView.windowToken != null
+    val hasValidSize = geckoView.width > 0 && geckoView.height > 0
     val now = android.os.SystemClock.elapsedRealtime()
 
-    if (!isOpen) {
+    if (!isOpen || !isAttached || !hasValidSize) {
+      Log.d(TAG, "Skipping thumbnail capture on tab $tabId: isOpen=$isOpen isAttached=$isAttached hasValidSize=$hasValidSize")
       return
     }
 

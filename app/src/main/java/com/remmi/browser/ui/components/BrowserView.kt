@@ -393,12 +393,14 @@ fun BrowserView(
           setProgressBackgroundColorSchemeColor(android.graphics.Color.parseColor("#121824"))
         }
         val gv = geckoEngine.getOrCreateGeckoView(ctx, tab.id).apply {
-          (parent as? ViewGroup)?.removeView(this)
-          setBackgroundColor(surfaceColor)
-          tag = tab.id
+          if (parent !== swipeLayout) {
+            (parent as? ViewGroup)?.removeView(this)
+            setBackgroundColor(surfaceColor)
+            tag = tab.id
+            swipeLayout.addView(this)
+          }
           geckoViewRef = this
         }
-        swipeLayout.addView(gv)
         swipeLayout.canScrollUpCallback = {
           val scrollY = geckoEngine.getScrollY(tab.id)
           if (scrollY > 10) {
@@ -434,11 +436,21 @@ fun BrowserView(
       },
       update = { swipeLayout ->
         swipeRefreshRef = swipeLayout
-        val geckoView = (swipeLayout.getChildAt(0) as? GeckoView) ?: geckoEngine.getOrCreateGeckoView(swipeLayout.context, tab.id).also {
-          (it.parent as? ViewGroup)?.removeView(it)
-          it.setBackgroundColor(surfaceColor)
-          swipeLayout.addView(it)
+        val targetGeckoView = geckoEngine.getOrCreateGeckoView(swipeLayout.context, tab.id)
+        if (targetGeckoView.parent !== swipeLayout) {
+          (targetGeckoView.parent as? ViewGroup)?.removeView(targetGeckoView)
+          targetGeckoView.setBackgroundColor(surfaceColor)
+          targetGeckoView.tag = tab.id
+          swipeLayout.addView(targetGeckoView)
+          // Atomically remove old views only after the target replacement view is attached
+          for (i in swipeLayout.childCount - 1 downTo 0) {
+            val child = swipeLayout.getChildAt(i)
+            if (child !== targetGeckoView) {
+              swipeLayout.removeViewAt(i)
+            }
+          }
         }
+        val geckoView = targetGeckoView
         geckoViewRef = geckoView
         val prevTag = geckoView.tag as? String
         val isTagMatch = prevTag == tab.id
@@ -489,23 +501,21 @@ fun BrowserView(
         }
       },
       onRelease = { swipeLayout ->
-        val geckoView = swipeLayout.getChildAt(0) as? GeckoView
+        val geckoView = (swipeLayout.getChildAt(0) as? GeckoView) ?: geckoViewRef
         if (geckoView != null) {
           val currentTag = geckoView.tag as? String ?: tab.id
           val gvId = "0x" + Integer.toHexString(System.identityHashCode(geckoView))
           val now = android.os.SystemClock.elapsedRealtime()
           val relMsg = "[FORENSIC][VIEW_ON_RELEASE] tabId=${tab.id} view=$gvId tag=$currentTag url=${tab.url} elapsedRealtime=$now"
-          android.util.Log.i("BrowserView", relMsg)
-          com.remmi.browser.util.DebugLogManager.log(relMsg)
-
-          val isRealWebUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
-          if (isRealWebUrl) {
-            com.remmi.browser.engine.TabThumbnailManager.getInstance(context).captureGeckoView(tab.id, geckoView, debounceMs = 0L)
+          if (com.remmi.browser.BuildConfig.DEBUG) {
+            android.util.Log.d("BrowserView", relMsg)
           }
-          geckoViewRef = null
+          com.remmi.browser.util.DebugLogManager.log(relMsg)
         }
+        // Preserve existing GeckoView and session in geckoEngine.
+        // Do NOT capture thumbnail here (captured safely on page load completion).
+        // Do NOT call removeAllViews() or immediately detach GeckoView during transient Compose updates/recompositions.
         swipeRefreshRef = null
-        swipeLayout.removeAllViews()
       },
     )
   }
