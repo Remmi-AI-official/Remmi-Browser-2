@@ -67,39 +67,9 @@ jobs:
           STORE_PASSWORD: ${{ secrets.REMMI_RELEASE_STORE_PASSWORD || secrets.STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD || '' }}
           KEY_ALIAS: ${{ secrets.REMMI_RELEASE_KEY_ALIAS || secrets.KEY_ALIAS || secrets.RELEASE_KEY_ALIAS || '' }}
           KEY_PASSWORD: ${{ secrets.REMMI_RELEASE_KEY_PASSWORD || secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD || '' }}
+          KEYSTORE_FILE: ${{ github.workspace }}/release-keystore.jks
         run: |
-          set -euo pipefail
-
-          if [ -z "${KEYSTORE_BASE64:-}" ]; then
-            echo "::error::CRITICAL RELEASE FAILURE: REMMI_RELEASE_KEYSTORE_B64 secret is not configured. Release signing requires a dedicated valid signing keystore secret."
-            exit 1
-          fi
-
-          if [ -z "${STORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
-            echo "::error::CRITICAL RELEASE FAILURE: Release keystore credentials (STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) must be provided in GitHub Secrets."
-            exit 1
-          fi
-
-          KEYSTORE_FILE="${{ github.workspace }}/release-keystore.jks"
-          rm -f "$KEYSTORE_FILE"
-
-          python3 -c "import os, base64, re; raw = os.environ.get('KEYSTORE_BASE64', ''); cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw); cleaned += '=' * ((4 - len(cleaned) % 4) % 4); open('$KEYSTORE_FILE', 'wb').write(base64.b64decode(cleaned))"
-
-          if [ ! -s "$KEYSTORE_FILE" ]; then
-            echo "::error::CRITICAL RELEASE FAILURE: Failed to decode release keystore from secret."
-            exit 1
-          fi
-
-          if ! keytool -list -keystore "$KEYSTORE_FILE" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null 2>&1; then
-            echo "::error::CRITICAL RELEASE FAILURE: Failed to unlock release keystore with alias '$KEY_ALIAS'."
-            exit 1
-          fi
-
-          echo "Release keystore validated successfully."
-          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
-          echo "STORE_PASSWORD=${STORE_PASSWORD}" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
-          echo "KEY_PASSWORD=${KEY_PASSWORD}" >> "$GITHUB_ENV"
+          python3 .github/scripts/prepare_release_keystore.py
 
       - name: Validate Release Signing Configuration
         env:
@@ -110,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$KEYSTORE_PATH"
-          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS"
           echo "Release keystore and alias verified."
 
       - name: Build Release APKs & Bundle (AAB)
