@@ -20,6 +20,56 @@ def run_keytool(args):
     cmd = ['keytool'] + args
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
+def try_repair_pkcs12_single_byte(data_bytes, password):
+    if len(data_bytes) < 4 or data_bytes[0] != 0x30 or data_bytes[1] != 0x82:
+        return None
+    expected_len = (data_bytes[2] << 8 | data_bytes[3]) + 4
+    if expected_len - len(data_bytes) != 1:
+        return None
+    
+    java_src = """
+import java.io.ByteArrayInputStream;
+import java.io.FileOutputStream;
+import java.security.KeyStore;
+
+public class KeystoreRepair {
+    public static void main(String[] args) throws Exception {
+        byte[] trunc = java.util.Base64.getDecoder().decode(args[0]);
+        char[] pass = args[1].toCharArray();
+        String outPath = args[2];
+        
+        byte[] cand = new byte[trunc.length + 1];
+        System.arraycopy(trunc, 0, cand, 0, trunc.length);
+        for (int b = 0; b < 256; b++) {
+            cand[trunc.length] = (byte) b;
+            try {
+                KeyStore ks = KeyStore.getInstance("PKCS12");
+                ks.load(new ByteArrayInputStream(cand), pass);
+                new FileOutputStream(outPath).write(cand);
+                System.out.println("REPAIRED_1");
+                return;
+            } catch (Exception e) {}
+        }
+        System.out.println("FAILED");
+    }
+}
+"""
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            src_path = os.path.join(td, 'KeystoreRepair.java')
+            with open(src_path, 'w') as f:
+                f.write(java_src)
+            subprocess.run(['javac', src_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            out_file = os.path.join(td, 'repaired.jks')
+            b64_in = base64.b64encode(data_bytes).decode('utf-8')
+            res = subprocess.run(['java', '-cp', td, 'KeystoreRepair', b64_in, password, out_file], capture_output=True, text=True)
+            if 'REPAIRED' in res.stdout and os.path.exists(out_file):
+                return open(out_file, 'rb').read()
+    except Exception:
+        pass
+    return None
+
 def main():
     keystore_b64 = os.environ.get('KEYSTORE_BASE64', '').strip()
     store_pass = os.environ.get('STORE_PASSWORD', '').strip()
@@ -91,9 +141,24 @@ def main():
         der_expected_len = (decoded_bytes[2] << 8 | decoded_bytes[3]) + 4
         if file_size < der_expected_len:
             missing = der_expected_len - file_size
-            print(f"::error::[CRITICAL CORRUPTION]: Keystore is truncated by exactly {missing} byte(s).")
-            print(f"::error::Expected {der_expected_len} bytes per PKCS#12 ASN.1 header, but decoded only {file_size} bytes.")
-            print(f"::error::The Base64 string in REMMI_RELEASE_KEYSTORE_B64 is missing its trailing character(s).")
+            print(f"::warning::Keystore is truncated by {missing} byte(s) (expected {der_expected_len} bytes, got {file_size}).")
+            if missing == 1:
+                print("::notice::Attempting in-memory brute-force recovery for the missing trailing byte...")
+                repaired = try_repair_pkcs12_single_byte(decoded_bytes, store_pass)
+                if not repaired and key_pass and key_pass != store_pass:
+                    repaired = try_repair_pkcs12_single_byte(decoded_bytes, key_pass)
+                    if repaired:
+                        store_pass, key_pass = key_pass, store_pass
+                if repaired:
+                    decoded_bytes = repaired
+                    with open(keystore_file, 'wb') as f:
+                        f.write(decoded_bytes)
+                    file_size = len(decoded_bytes)
+                    print(f"::notice::SUCCESS! Auto-repaired missing byte in PKCS#12 keystore ({file_size} bytes restored).")
+                else:
+                    print(f"::error::[CRITICAL CORRUPTION]: Failed to auto-repair truncated keystore.")
+            else:
+                print(f"::error::[CRITICAL CORRUPTION]: Keystore is truncated by {missing} bytes. Re-export and update REMMI_RELEASE_KEYSTORE_B64.")
 
     # Step 1: Verify store password across formats (Auto, PKCS12, JKS)
     res = run_keytool(['-list', '-keystore', keystore_file, '-storepass', store_pass])
