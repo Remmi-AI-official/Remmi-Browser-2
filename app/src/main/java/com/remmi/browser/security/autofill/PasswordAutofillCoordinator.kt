@@ -120,6 +120,13 @@ class PasswordAutofillCoordinator(
       onDismiss()
       return
     }
+    
+    // BUG B FIX: Do not show the save prompt if the vault is locked.
+    if (!passwordRepo.isUnlocked()) {
+      Log.i(TAG, "Vault is locked. Suppressing password save prompt to prevent silent failures.")
+      onDismiss()
+      return
+    }
 
     _savePrompt.value = SavePasswordPromptRequest(
       tabId = tabId,

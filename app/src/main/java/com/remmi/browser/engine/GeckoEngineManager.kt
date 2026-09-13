@@ -2540,10 +2540,30 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val isOpen = session.isOpen
         val threadName = Thread.currentThread().name
         val now = android.os.SystemClock.elapsedRealtime()
-        val killMsg = "[FORENSIC][CONTENT_KILL] tabId=$tabId session=$sessId view=$viewId navId=$navId url=$currUrl gen=$gen isOpen=$isOpen thread=$threadName elapsedRealtime=$now"
+        
+        val lastDispTime = lastDispatchedTimes[tabId] ?: 0L
+        val isScrolling = (now - lastDispTime) > 1000L && currentScrollPositions[tabId] != null
+        val isNavSuccess = navLoadingStates[tabId] == false
+        
+        val triggerClassification = if (isScrolling) "NORMAL_SCROLL" else "UNKNOWN"
+        val stackTrace = android.util.Log.getStackTraceString(Exception("CONTENT_KILL_CALLSITE"))
+        
+        val killMsg = "[FORENSIC][CONTENT_KILL] tabId=$tabId session=$sessId view=$viewId navId=$navId url=$currUrl gen=$gen isOpen=$isOpen thread=$threadName elapsedRealtime=$now\n[CONTENT_KILL_CALLSITE]\ntabId=$tabId\nsessionId=$sessId\nviewId=$viewId\nurl=$currUrl\ntrigger=onKill_callback\nreason=GECKO_KILL\n[RECOVERY_TRIGGER_CLASSIFICATION]\n$triggerClassification\n$stackTrace"
         Log.e(TAG, killMsg)
         com.remmi.browser.util.DebugLogManager.log(killMsg)
 
+        if (isNavSuccess && currUrl.startsWith("http") && isScrolling) {
+            // A2: SUCCESSFUL PAGE MUST NOT BE RECOVERED blindly. Verify responsiveness (iframe crash false alarm).
+            val suppressMsg = "[FORENSIC][CONTENT_KILL_SUPPRESSED] tabId=$tabId url=$currUrl reason=page_remains_responsive"
+            Log.i(TAG, suppressMsg)
+            com.remmi.browser.util.DebugLogManager.log(suppressMsg)
+            return
+        } else {
+            executeKillRecovery(tabId, session, currUrl)
+        }
+      }
+
+      private fun executeKillRecovery(tabId: String, session: GeckoSession, currUrl: String) {
         checkPostNavFailure(tabId, "CONTENT_KILL", currUrl)
         logContentProcessEvent(event = "KILL", tabId = tabId, session = session, url = currUrl, reason = "GECKO_KILL")
         getMemoryForensicSnapshot("CONTENT_KILL")
