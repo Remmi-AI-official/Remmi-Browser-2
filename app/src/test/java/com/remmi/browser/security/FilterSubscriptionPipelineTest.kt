@@ -207,5 +207,37 @@ class FilterSubscriptionPipelineTest {
     )
     assertFalse("Harmless first-party document must be allowed", firstPartyDocDecision.blocked)
   }
+
+  @Test
+  fun testEngineAuthorityAndFullRulesetSync() {
+    val initialAuth = adblockBridge.getEngineAuthority()
+    assertTrue("Initial active rules must be > 0", initialAuth.activeRules > 0)
+    assertTrue("Mode must be valid", initialAuth.mode == "FALLBACK" || initialAuth.mode == "NATIVE")
+
+    val customRules = """
+      ||analytics-tracker.org^
+      ||telemetry-beacon.io^
+      ||ad-banner-network.com^
+    """.trimIndent()
+    val compiled = adblockBridge.compileRules(customRules)
+    assertTrue("Compiled count must be positive", compiled > 0)
+
+    val updatedAuth = adblockBridge.getEngineAuthority()
+    assertTrue("Active rules in authority must reflect compiled rules", updatedAuth.activeRules >= 3)
+    assertEquals(updatedAuth.activeRules, adblockBridge.getLoadedRulesCount())
+
+    // Request matching
+    val decision = adblockBridge.evaluateDecision(
+      url = "https://analytics-tracker.org/script.js",
+      sourceUrl = "https://example.com",
+      resourceType = "script",
+      thirdParty = true
+    )
+    assertTrue("Custom rule must block request", decision.blocked)
+
+    // Ensure fallback engine contains all compiled rules
+    val fallback = adblockBridge.getActiveFallbackEngine()
+    assertTrue("Fallback engine must contain compiled rules", fallback.ruleCount >= 3)
+  }
 }
 

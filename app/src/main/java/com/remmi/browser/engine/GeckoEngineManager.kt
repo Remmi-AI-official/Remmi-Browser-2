@@ -1715,6 +1715,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
             val blockMsg = "[FORENSIC] [NAV_REDIRECT_BLOCKED] tabId=$tabId url=$url sourceUrl=$sourceUrl isRedirect=$isRedirect hasUserGesture=$hasUserGesture ruleId=$blockedRuleId"
             Log.w(TAG, blockMsg)
             com.remmi.browser.util.DebugLogManager.log(blockMsg)
+            Log.i(TAG, "[ADBLOCK_BLOCK] url=$url rule=$blockedRuleId")
             Log.i(TAG, "[ADBLOCK_BLOCK]\n$url\nmatched_rule\n$blockedRuleId")
             NavigationChainTracker.markSecurityBlocked(tabId, url, "adblock_redirect_denied")
             withContext(Dispatchers.Main) {

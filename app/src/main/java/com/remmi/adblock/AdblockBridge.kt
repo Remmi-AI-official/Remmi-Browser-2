@@ -165,6 +165,17 @@ data class FallbackEngineSet(
   val fallbackProceduralFilters: List<String> = emptyList(),
   val fallbackCosmeticExceptions: Set<String> = emptySet(),
   val generation: Long = 1L
+) {
+  val ruleCount: Int
+    get() = blockedHostnames.size + blockedSubstrings.size + fallbackNetworkRules.size
+}
+
+data class EngineAuthority(
+  val mode: String, // "NATIVE" or "FALLBACK"
+  val generation: Long,
+  val activeRules: Int,
+  val nativeRules: Int,
+  val fallbackRules: Int
 )
 
 /**
@@ -642,6 +653,46 @@ class AdblockBridge {
 
   fun getActiveFallbackEngine(): FallbackEngineSet = activeFallbackEngine
 
+  fun getEngineAuthority(): EngineAuthority {
+    val gen = getEngineGeneration()
+    val nativeRules = if (isNativeLoaded) {
+      try {
+        val cnt = nativeGetFilterCount()
+        if (cnt > 0) cnt else 0
+      } catch (_: Throwable) { 0 }
+    } else 0
+
+    val fallback = activeFallbackEngine
+    val fallbackRules = fallback.ruleCount
+
+    // Authoritative engine determination:
+    // Strictly prevent the forbidden state: NATIVE_PARTIAL + FALLBACK_FULL + isNative=true.
+    // If native has full ruleset (>= 1000) or fallback does not have a full ruleset (< 1000), use NATIVE if loaded.
+    // If native only has partial (< 1000) rules while fallback has full ruleset (>= 1000), FALLBACK is authoritative.
+    val mode = if (isNativeLoaded && (nativeRules >= 1000 || fallbackRules < 1000)) {
+      "NATIVE"
+    } else {
+      "FALLBACK"
+    }
+
+    val activeRules = if (mode == "NATIVE") nativeRules else fallbackRules
+
+    return EngineAuthority(
+      mode = mode,
+      generation = gen,
+      activeRules = activeRules,
+      nativeRules = nativeRules,
+      fallbackRules = fallbackRules
+    )
+  }
+
+  fun logEngineAuthority(source: String = "") {
+    val auth = getEngineAuthority()
+    val msg = "[ADBLOCK_ENGINE_AUTHORITY] mode=${auth.mode} generation=${auth.generation} activeRules=${auth.activeRules} nativeRules=${auth.nativeRules} fallbackRules=${auth.fallbackRules}"
+    Log.i(TAG, msg)
+    com.remmi.browser.util.DebugLogManager.log(msg)
+  }
+
   fun applyFallbackEngineDirectly(
     engine: FallbackEngineSet,
     ruleCount: Int,
@@ -654,7 +705,58 @@ class AdblockBridge {
         activeFallbackEngine = engine.copy(generation = newGen)
         Log.i(TAG, "[ADBLOCK_ENGINE_SWAP_DIRECT] oldGeneration=$oldGen newGeneration=$newGen rules=$ruleCount source=$source")
       }
+      logEngineAuthority(source = source)
       return ruleCount
+    }
+  }
+
+  fun compileNativeRulesOnly(
+    defaultRulesText: String,
+    additionalRulesText: String = "",
+    source: String = "binary_cache"
+  ): Int {
+    if (!isNativeLoaded) return 0
+    synchronized(compileLock) {
+      val defaultBytes = defaultRulesText.toByteArray().size
+      val additionalBytes = additionalRulesText.toByteArray().size
+      val inputLines = defaultRulesText.count { it == '\n' } + additionalRulesText.count { it == '\n' }
+      val sess = com.remmi.browser.util.CrashHandlerHelper.currentSessionId
+      val pid = android.os.Process.myPid()
+      val jobId = "compile_native_${compileJobSequence.incrementAndGet()}"
+
+      val builtinRulesText = DEFAULT_DOMAINS.joinToString("\n") { "||$it^" } + "\n" +
+        DEFAULT_PATTERNS.joinToString("\n")
+
+      val combinedDefaultRulesText = if (defaultRulesText.isNotBlank()) {
+        "$builtinRulesText\n$defaultRulesText"
+      } else {
+        builtinRulesText
+      }
+
+      val compileStartMsg = "[COMPILE_START] jobId=$jobId inputBytes=${defaultBytes + additionalBytes} defaultBytes=$defaultBytes additionalBytes=$additionalBytes inputLines=$inputLines activeCompileJobs=1 ${getCompileMemoryStats()} sessionId=$sess processPid=$pid source=$source"
+      Log.i(TAG, compileStartMsg)
+      com.remmi.browser.util.DebugLogManager.log(compileStartMsg)
+      com.remmi.browser.util.CrashHandlerHelper.recordNativeOp(op = "[ADBLOCK_COMPILE_NATIVE_ONLY_START]")
+
+      var compiledCount = 0
+      try {
+        val metricsJson = nativeCompileRules(combinedDefaultRulesText, additionalRulesText)
+        val metricsObj = org.json.JSONObject(metricsJson)
+        compiledCount = metricsObj.optInt("parsedCandidates", 0)
+        Log.i(TAG, "[ADBLOCK_METRICS] compile_native_metrics: $metricsJson")
+        com.remmi.browser.util.CrashHandlerHelper.recordNativeOp(op = "[ADBLOCK_COMPILE_NATIVE_ONLY_OK]")
+      } catch (e: Throwable) {
+        com.remmi.browser.util.CrashHandlerHelper.recordNativeOp(op = "[ADBLOCK_COMPILE_NATIVE_ONLY_FAILED]")
+        Log.e(TAG, "Native compile rules failed: ${e.message}", e)
+      }
+
+      synchronized(swapLock) {
+        val newGen = localEngineGeneration.incrementAndGet()
+        activeFallbackEngine = activeFallbackEngine.copy(generation = newGen)
+      }
+
+      logEngineAuthority(source = source)
+      return compiledCount
     }
   }
 
@@ -849,25 +951,19 @@ class AdblockBridge {
             }
           }
 
-          if (isNativeLoaded) {
-            val fallbackSkippedMsg = formatForensicMarker(jobId, "[POST_COMPILE_FALLBACK_SKIPPED]", workerState = "EXECUTING")
-            Log.i(TAG, fallbackSkippedMsg)
-            com.remmi.browser.util.DebugLogManager.log(fallbackSkippedMsg)
-          } else {
-            val fallbackBuildStartMsg = formatForensicMarker(jobId, "[POST_COMPILE_FALLBACK_BUILD_START]", workerState = "EXECUTING")
-            Log.i(TAG, fallbackBuildStartMsg)
-            com.remmi.browser.util.DebugLogManager.log(fallbackBuildStartMsg)
+          val fallbackBuildStartMsg = formatForensicMarker(jobId, "[POST_COMPILE_FALLBACK_BUILD_START]", workerState = "EXECUTING")
+          Log.i(TAG, fallbackBuildStartMsg)
+          com.remmi.browser.util.DebugLogManager.log(fallbackBuildStartMsg)
 
-            parseToFallback(combinedDefaultRulesText, false)
-            parseToFallback(additionalRulesText, true)
-            
-            tempParsedRules.reverse()
-            newNetworkRules.addAll(0, tempParsedRules)
+          parseToFallback(combinedDefaultRulesText, false)
+          parseToFallback(additionalRulesText, true)
+          
+          tempParsedRules.reverse()
+          newNetworkRules.addAll(0, tempParsedRules)
 
-            val fallbackBuildDoneMsg = formatForensicMarker(jobId, "[POST_COMPILE_FALLBACK_BUILD_DONE]", workerState = "EXECUTING")
-            Log.i(TAG, fallbackBuildDoneMsg)
-            com.remmi.browser.util.DebugLogManager.log(fallbackBuildDoneMsg)
-          }
+          val fallbackBuildDoneMsg = formatForensicMarker(jobId, "[POST_COMPILE_FALLBACK_BUILD_DONE]", workerState = "EXECUTING")
+          Log.i(TAG, fallbackBuildDoneMsg)
+          com.remmi.browser.util.DebugLogManager.log(fallbackBuildDoneMsg)
 
           val parseDoneMarkerMsg = formatForensicMarker(jobId, "[POST_COMPILE_RESULT_PARSE_DONE]", workerState = "EXECUTING")
           Log.i(TAG, parseDoneMarkerMsg)
@@ -956,6 +1052,7 @@ class AdblockBridge {
           Log.i(TAG, swapDoneMsg)
           com.remmi.browser.util.DebugLogManager.log(swapDoneMsg)
           Log.d(TAG, "[ADBLOCK_ENGINE_SWAP] oldGeneration=$oldGen newGeneration=$newGen rules=$compiledCount")
+          logEngineAuthority(source = source)
 
           val currentJobId = jobId
           postSwapScheduler.schedule({
@@ -1005,7 +1102,7 @@ class AdblockBridge {
         error = null
       )
     }
-    if (isNativeLoaded) {
+    if (getEngineAuthority().mode == "NATIVE") {
       try {
         val classesJson = org.json.JSONArray(classes).toString()
         val idsJson = org.json.JSONArray(ids).toString()
@@ -1197,6 +1294,25 @@ class AdblockBridge {
     return evaluateDecision(url, sourceUrl, resourceType = resourceType).blocked
   }
 
+  private fun returnDecision(url: String, decision: BlockDecision): BlockDecision {
+    val actionStr = if (decision.blocked) "BLOCK" else "ALLOW"
+    val ruleStr = decision.ruleId ?: (if (decision.blocked) "matched" else "none")
+    val matchMsg = "[ADBLOCK_MATCH] url=$url rule=$ruleStr action=$actionStr"
+    Log.i(TAG, matchMsg)
+    com.remmi.browser.util.DebugLogManager.log(matchMsg)
+
+    if (decision.blocked) {
+      val blockMsg = "[ADBLOCK_BLOCK] url=$url"
+      Log.i(TAG, blockMsg)
+      com.remmi.browser.util.DebugLogManager.log(blockMsg)
+    } else {
+      val allowMsg = "[ADBLOCK_ALLOW] url=$url"
+      Log.i(TAG, allowMsg)
+      com.remmi.browser.util.DebugLogManager.log(allowMsg)
+    }
+    return decision
+  }
+
   fun evaluateDecision(
     url: String, 
     sourceUrl: String = "", 
@@ -1214,16 +1330,22 @@ class AdblockBridge {
     }
     val currentGen = getEngineGeneration()
 
+    val reqSeenMsg = "[ADBLOCK_REQUEST_SEEN] url=$url type=$resourceType thirdParty=$thirdParty"
+    Log.i(TAG, reqSeenMsg)
+    com.remmi.browser.util.DebugLogManager.log(reqSeenMsg)
+
     if (diagnosticBypassForTesting) {
-      return BlockDecision(
+      val bypassDecision = BlockDecision(
         blocked = false,
         ruleId = "diagnostic_bypass",
         ruleSource = "DiagnosticMode",
         engineGeneration = currentGen
       )
+      return returnDecision(url, bypassDecision)
     }
     try {
-      if (isNativeLoaded) {
+      val auth = getEngineAuthority()
+      if (auth.mode == "NATIVE") {
         try {
           // Serialize request context
           val context = org.json.JSONObject().apply {
@@ -1250,21 +1372,31 @@ class AdblockBridge {
             Log.d(TAG, "[NATIVE_MATCH_END] requestId=$requestId elapsedNanos=$elapsedNs blocked=$blocked")
           }
 
-          return BlockDecision(
+          val defaultMatched = resultObj.optBoolean("defaultMatched", false)
+          val additionalMatched = resultObj.optBoolean("additionalMatched", false)
+          val matchedRuleId = when {
+            defaultMatched -> "default_ruleset"
+            additionalMatched -> "additional_ruleset"
+            blocked -> "native_pattern"
+            else -> null
+          }
+
+          val nativeDecision = BlockDecision(
             blocked = blocked,
-            ruleId = "native",
+            ruleId = matchedRuleId,
             ruleSource = "RustEngine",
             engineGeneration = currentGen,
             redirectUrl = if (resultObj.has("redirect") && !resultObj.isNull("redirect")) resultObj.optString("redirect").takeIf { it.isNotEmpty() } else null,
             rewrittenUrl = if (resultObj.has("rewrittenUrl") && !resultObj.isNull("rewrittenUrl")) resultObj.optString("rewrittenUrl").takeIf { it.isNotEmpty() } else null,
             csp = if (resultObj.has("csp") && !resultObj.isNull("csp")) resultObj.optString("csp").takeIf { it.isNotEmpty() } else null,
-            defaultMatched = resultObj.optBoolean("defaultMatched", false),
+            defaultMatched = defaultMatched,
             defaultException = resultObj.optBoolean("defaultException", false),
             defaultImportant = resultObj.optBoolean("defaultImportant", false),
-            additionalMatched = resultObj.optBoolean("additionalMatched", false),
+            additionalMatched = additionalMatched,
             additionalException = resultObj.optBoolean("additionalException", false),
             additionalImportant = resultObj.optBoolean("additionalImportant", false)
           )
+          return returnDecision(url, nativeDecision)
         } catch (t: Throwable) {
           state = AdblockState.DEGRADED
           Log.e(TAG, "[ADBLOCK_DECISION_ERROR] ${t.javaClass.name}: ${t.message}", t)
@@ -1282,12 +1414,12 @@ class AdblockBridge {
 
       val host = uri.host?.lowercase() ?: run {
         logSlowDecisionIfNeeded(startNs, resourceType)
-        return BlockDecision(
+        return returnDecision(url, BlockDecision(
           blocked = false,
           ruleId = "invalid_host",
           ruleSource = "KotlinFallback",
           engineGeneration = currentGen
-        )
+        ))
       }
 
       val lowerUrl = url.lowercase()
@@ -1299,14 +1431,14 @@ class AdblockBridge {
       val importantException = fallback.fallbackNetworkRules.firstOrNull { it.isException && it.isImportant && it.matches(lowerUrl, host, method, resourceType, thirdParty, sourceHost) }
       if (importantException != null) {
         logSlowDecisionIfNeeded(startNs, resourceType)
-        return BlockDecision(
+        return returnDecision(url, BlockDecision(
           blocked = false,
           ruleId = "important_exception:${importantException.raw}",
           ruleSource = "KotlinFallback",
           engineGeneration = currentGen,
           defaultException = true,
           defaultImportant = true
-        )
+        ))
       }
 
       // 2. Check Important Blocks (...$important)
@@ -1314,27 +1446,27 @@ class AdblockBridge {
       if (importantBlock != null) {
         totalBlockedCount.incrementAndGet()
         logSlowDecisionIfNeeded(startNs, resourceType)
-        return BlockDecision(
+        return returnDecision(url, BlockDecision(
           blocked = true,
           ruleId = "important_block:${importantBlock.raw}",
           ruleSource = "KotlinFallback",
           engineGeneration = currentGen,
           defaultMatched = true,
           defaultImportant = true
-        )
+        ))
       }
 
       // 3. Check Normal Exceptions (@@...)
       val normalException = fallback.fallbackNetworkRules.firstOrNull { it.isException && !it.isImportant && it.matches(lowerUrl, host, method, resourceType, thirdParty, sourceHost) }
       if (normalException != null) {
         logSlowDecisionIfNeeded(startNs, resourceType)
-        return BlockDecision(
+        return returnDecision(url, BlockDecision(
           blocked = false,
           ruleId = "exception:${normalException.raw}",
           ruleSource = "KotlinFallback",
           engineGeneration = currentGen,
           defaultException = true
-        )
+        ))
       }
 
       // 4. Check Normal Blocks
@@ -1342,13 +1474,13 @@ class AdblockBridge {
       if (normalBlock != null) {
         totalBlockedCount.incrementAndGet()
         logSlowDecisionIfNeeded(startNs, resourceType)
-        return BlockDecision(
+        return returnDecision(url, BlockDecision(
           blocked = true,
           ruleId = "block:${normalBlock.raw}",
           ruleSource = "KotlinFallback",
           engineGeneration = currentGen,
           defaultMatched = true
-        )
+        ))
       }
 
       if (fallback.allowList.any { rule ->
@@ -1356,24 +1488,24 @@ class AdblockBridge {
         cleanRule.isNotEmpty() && (host == cleanRule || host.endsWith(".$cleanRule") || (cleanRule.length > 2 && lowerUrl.contains(cleanRule)))
       }) {
         logSlowDecisionIfNeeded(startNs, resourceType)
-        return BlockDecision(
+        return returnDecision(url, BlockDecision(
           blocked = false,
           ruleId = "allowlist",
           ruleSource = "KotlinFallback",
           engineGeneration = currentGen
-        )
+        ))
       }
 
       for (blockedHost in fallback.blockedHostnames) {
         if (host == blockedHost || host.endsWith(".$blockedHost")) {
           totalBlockedCount.incrementAndGet()
           logSlowDecisionIfNeeded(startNs, resourceType)
-          return BlockDecision(
+          return returnDecision(url, BlockDecision(
             blocked = true,
             ruleId = "host:$blockedHost",
             ruleSource = "KotlinFallback",
             engineGeneration = currentGen
-          )
+          ))
         }
       }
 
@@ -1381,22 +1513,22 @@ class AdblockBridge {
         if (lowerUrl.contains(pattern)) {
           totalBlockedCount.incrementAndGet()
           logSlowDecisionIfNeeded(startNs, resourceType)
-          return BlockDecision(
+          return returnDecision(url, BlockDecision(
             blocked = true,
             ruleId = "pattern:$pattern",
             ruleSource = "KotlinFallback",
             engineGeneration = currentGen
-          )
+          ))
         }
       }
 
       logSlowDecisionIfNeeded(startNs, resourceType)
-      return BlockDecision(
+      return returnDecision(url, BlockDecision(
         blocked = false,
         ruleId = "none",
         ruleSource = "KotlinFallback",
         engineGeneration = currentGen
-      )
+      ))
     } catch (t: Throwable) {
       Log.e(TAG, "[ADBLOCK_DECISION_ERROR] ${t.javaClass.name}: ${t.message}", t)
       throw t
@@ -1413,14 +1545,7 @@ class AdblockBridge {
   fun getApiVersion(): Int = nativeNumericApiVersion
 
   fun getLoadedRulesCount(): Int {
-    if (isNativeLoaded) {
-      try {
-        val count = nativeGetFilterCount()
-        if (count > 0) return count
-      } catch (_: Throwable) {}
-    }
-    val fallback = activeFallbackEngine
-    return fallback.blockedHostnames.size + fallback.blockedSubstrings.size
+    return getEngineAuthority().activeRules
   }
 
   // Native JNI functions implemented in rust/src/lib.rs

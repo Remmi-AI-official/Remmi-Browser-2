@@ -68,21 +68,8 @@ class PasswordAutofillCoordinator(
             username = user,
             password = pass,
             onSave = {
-              scope.launch(Dispatchers.IO) {
-                try {
-                  val canonical = PasswordCryptoEngine.canonicalizeOrigin(origin) ?: origin
-                  if (canonical.isNotBlank()) {
-                    passwordRepo.saveOrUpdateEntry(
-                      url = canonical,
-                      username = user,
-                      password = pass
-                    )
-                    Log.i(TAG, "Saved password for $canonical to Password Vault via WebExtension bridge.")
-                  }
-                } catch (e: Exception) {
-                  Log.e(TAG, "Failed saving password via WebExtension bridge: ${e.message}", e)
-                }
-              }
+              // Direct save is already performed inside requestLoginSave; avoid duplicate secondary save
+              Log.i(TAG, "Saved password confirmed via WebExtension bridge for origin: $origin")
             },
             onDismiss = {}
           )

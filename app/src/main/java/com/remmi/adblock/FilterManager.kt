@@ -234,10 +234,11 @@ class FilterManager(
     val fanboy = _subscriptions.value.find { it.id == "fanboy_annoyance" }
     val brave = _subscriptions.value.find { it.id == "brave_unbreak" }
     val totalActive = getTotalActiveRules()
-    val isNative = adblockBridge.isNativeAvailable()
-    val gen = adblockBridge.getEngineGeneration()
+    val auth = adblockBridge.getEngineAuthority()
+    val isNative = (auth.mode == "NATIVE")
+    val gen = auth.generation
     val blockedCount = adblockBridge.totalBlockedCount.get()
-    val totalCompiled = adblockBridge.getLoadedRulesCount()
+    val totalCompiled = auth.activeRules
     val ts = System.currentTimeMillis()
     val sess = com.remmi.browser.util.CrashHandlerHelper.currentSessionId
 
@@ -248,6 +249,7 @@ class FilterManager(
     com.remmi.browser.util.DebugLogManager.log(
       "[ADBLOCK_RULESET_STATUS] source=$source activeGen=$gen native=$isNative compiled=$totalCompiled raw=$totalActive"
     )
+    adblockBridge.logEngineAuthority(source = source)
   }
 
   private suspend fun loadPersistedRulesIntoBridgeAsync(source: String = "unknown"): Int = withContext(Dispatchers.IO) {
@@ -296,12 +298,26 @@ class FilterManager(
             val cachedBinary = FilterBinaryCache.loadFromCache(context, rulesHash)
             if (cachedBinary != null) {
               val (ruleCount, cachedEngine) = cachedBinary
-              val appliedCount = adblockBridge.applyFallbackEngineDirectly(cachedEngine, ruleCount, source = "binary_cache")
-              val newGen = adblockBridge.getEngineGeneration()
-              Log.i(TAG, "[FILTER_LIFECYCLE] list=all stage=BINARY_CACHE_HIT total_loaded=$appliedCount newGeneration=$newGen source=$source")
-              com.remmi.browser.util.DebugLogManager.log("[FILTER_LIFECYCLE] list=all stage=BINARY_CACHE_HIT gen=$newGen count=$appliedCount")
-              logAdblockStatus(source = source)
-              return@withLock appliedCount
+              val actualFallbackCount = cachedEngine.ruleCount
+              if (ruleCount > 1000 && actualFallbackCount < 1000) {
+                Log.w(TAG, "[FILTER_LIFECYCLE] list=all stage=BINARY_CACHE_CORRUPTED actualCount=$actualFallbackCount ruleCount=$ruleCount, rebuilding cache")
+              } else {
+                val appliedCount = adblockBridge.applyFallbackEngineDirectly(cachedEngine, ruleCount, source = "binary_cache")
+                
+                // CRITICAL ARCHITECTURAL FIX:
+                // Compile the FULL ruleset into the native engine!
+                // Do NOT leave native at the initial 91 default rules while fallback has 185k!
+                if (adblockBridge.isNativeAvailable()) {
+                  val nativeCompiled = adblockBridge.compileNativeRulesOnly(defaultStr, additionalStr, source = "binary_cache")
+                  Log.i(TAG, "[FILTER_LIFECYCLE] list=all stage=NATIVE_COMPILED_FROM_CACHE nativeRules=$nativeCompiled")
+                }
+
+                val newGen = adblockBridge.getEngineGeneration()
+                Log.i(TAG, "[FILTER_LIFECYCLE] list=all stage=BINARY_CACHE_HIT total_loaded=$appliedCount newGeneration=$newGen source=$source")
+                com.remmi.browser.util.DebugLogManager.log("[FILTER_LIFECYCLE] list=all stage=BINARY_CACHE_HIT gen=$newGen count=$appliedCount")
+                logAdblockStatus(source = source)
+                return@withLock appliedCount
+              }
             }
           }
 

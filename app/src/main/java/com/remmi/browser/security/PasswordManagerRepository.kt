@@ -19,9 +19,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.nio.charset.StandardCharsets
 import java.util.Arrays
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import org.mozilla.geckoview.Autocomplete
 
@@ -68,6 +71,12 @@ class PasswordManagerRepository private constructor(
 
   private val _failedAttempts = MutableStateFlow(0)
   val failedAttempts: StateFlow<Int> = _failedAttempts.asStateFlow()
+
+  private val _lockoutSecondsRemaining = MutableStateFlow(0)
+  val lockoutSecondsRemaining: StateFlow<Int> = _lockoutSecondsRemaining.asStateFlow()
+
+  private val saveMutex = Mutex()
+  private val recentSaveTimes = ConcurrentHashMap<String, Long>()
 
   private var countdownJob: Job? = null
 
@@ -596,10 +605,12 @@ class PasswordManagerRepository private constructor(
     countdownJob = scope.launch {
       var current = remainingSec
       while (current > 0) {
+        _lockoutSecondsRemaining.value = current
         _lockState.value = VaultLockState.TemporarilyLocked(current, totalSec)
         delay(1000L)
         current--
       }
+      _lockoutSecondsRemaining.value = 0
       prefs.edit().remove(KEY_LOCKOUT_UNTIL_TIMESTAMP).apply()
       _lockState.value = VaultLockState.Locked
     }
@@ -607,6 +618,7 @@ class PasswordManagerRepository private constructor(
 
   private fun resetFailedAttempts() {
     _failedAttempts.value = 0
+    _lockoutSecondsRemaining.value = 0
     prefs.edit()
       .putInt(KEY_FAILED_ATTEMPTS, 0)
       .remove(KEY_LOCKOUT_UNTIL_TIMESTAMP)
@@ -674,54 +686,120 @@ class PasswordManagerRepository private constructor(
     notes: String = "",
     existingId: Long = 0,
   ): Long = withContext(Dispatchers.IO) {
-    val state = _lockState.value
-    if (state !is VaultLockState.Unlocked) throw IllegalStateException("Vault is locked.")
+    saveMutex.withLock {
+      val state = _lockState.value
+      if (state !is VaultLockState.Unlocked) throw IllegalStateException("Vault is locked.")
 
-    val canonicalUrl = PasswordCryptoEngine.canonicalizeOrigin(url) ?: url.trim()
-    val siteHash = PasswordCryptoEngine.hashSiteUrl(canonicalUrl)
+      val canonicalUrl = PasswordCryptoEngine.canonicalizeOrigin(url) ?: url.trim()
+      val siteHash = PasswordCryptoEngine.hashSiteUrl(canonicalUrl)
+      val cleanUser = username.trim()
+      val cleanPass = password.trim()
 
-    var finalId = existingId
-    if (finalId <= 0) {
+      // Debounce window (3000ms): if identical entry was recently saved, prevent duplicate entry
+      val saveKey = "$canonicalUrl|$cleanUser|$cleanPass"
+      val now = System.currentTimeMillis()
+      val lastSaved = recentSaveTimes[saveKey]
+      if (lastSaved != null && (now - lastSaved) < 3000L && existingId <= 0) {
+        val existingCandidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
+        for (cand in existingCandidates) {
+          try {
+            val uBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, cand.usernameEncrypted, cand.iv, cand.authTag)
+            val u = String(uBytes, StandardCharsets.UTF_8).trim()
+            PasswordCryptoEngine.zeroize(uBytes)
+            if (u.equals(cleanUser, ignoreCase = true)) {
+              Log.i(TAG, "Debounced duplicate save for $canonicalUrl ($cleanUser), returning existing ID ${cand.id}")
+              return@withLock cand.id
+            }
+          } catch (_: Exception) {}
+        }
+      }
+      recentSaveTimes[saveKey] = now
+
+      var finalId = existingId
       val existingCandidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
-      for (cand in existingCandidates) {
+      if (finalId <= 0) {
+        for (cand in existingCandidates) {
+          try {
+            val uBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, cand.usernameEncrypted, cand.iv, cand.authTag)
+            val u = String(uBytes, StandardCharsets.UTF_8).trim()
+            PasswordCryptoEngine.zeroize(uBytes)
+            if (u.equals(cleanUser, ignoreCase = true)) {
+              finalId = cand.id
+              break
+            }
+          } catch (_: Exception) {}
+        }
+      }
+
+      val urlEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, canonicalUrl.toByteArray(StandardCharsets.UTF_8))
+      val userEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, cleanUser.toByteArray(StandardCharsets.UTF_8))
+      val passEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, cleanPass.toByteArray(StandardCharsets.UTF_8))
+      val notesEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, notes.toByteArray(StandardCharsets.UTF_8))
+
+      val fallbackIv = urlEnc.copyOfRange(0, PasswordCryptoEngine.IV_LENGTH_BYTES)
+      val fallbackAuthTag = urlEnc.copyOfRange(PasswordCryptoEngine.IV_LENGTH_BYTES, PasswordCryptoEngine.IV_LENGTH_BYTES + PasswordCryptoEngine.AUTH_TAG_LENGTH_BYTES)
+
+      val entity = PasswordEntryEntity(
+        id = finalId,
+        siteUrlHash = siteHash,
+        siteUrlEncrypted = urlEnc,
+        usernameEncrypted = userEnc,
+        passwordEncrypted = passEnc,
+        notesEncrypted = notesEnc,
+        createdAt = if (finalId > 0) System.currentTimeMillis() else System.currentTimeMillis(),
+        updatedAt = System.currentTimeMillis(),
+        iv = fallbackIv,
+        authTag = fallbackAuthTag,
+      )
+
+      if (finalId > 0) {
+        getDb().passwordEntryDao().update(entity)
+        Log.i(TAG, "Updated existing password entry ID $finalId for $canonicalUrl ($cleanUser)")
+        return@withLock finalId
+      } else {
+        val newId = getDb().passwordEntryDao().insert(entity)
+        Log.i(TAG, "Inserted new password entry ID $newId for $canonicalUrl ($cleanUser)")
+        return@withLock newId
+      }
+    }
+  }
+
+  suspend fun deduplicateDatabaseEntries(): Int = withContext(Dispatchers.IO) {
+    saveMutex.withLock {
+      val state = _lockState.value
+      if (state !is VaultLockState.Unlocked) return@withLock 0
+      val all = getDb().passwordEntryDao().getAllEntriesList()
+      if (all.size <= 1) return@withLock 0
+
+      val seen = mutableMapOf<String, PasswordEntryEntity>()
+      val idsToDelete = mutableListOf<Long>()
+
+      for (entry in all) {
         try {
-          val uBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, cand.usernameEncrypted, cand.iv, cand.authTag)
-          val u = String(uBytes, StandardCharsets.UTF_8)
-          PasswordCryptoEngine.zeroize(uBytes)
-          if (u.equals(username.trim(), ignoreCase = true)) {
-            finalId = cand.id
-            break
+          val url = String(PasswordCryptoEngine.decryptAesGcmPacked(state.dek, entry.siteUrlEncrypted, entry.iv, entry.authTag), StandardCharsets.UTF_8)
+          val host = PasswordCryptoEngine.canonicalizeOrigin(url) ?: url.trim().lowercase()
+          val user = String(PasswordCryptoEngine.decryptAesGcmPacked(state.dek, entry.usernameEncrypted, entry.iv, entry.authTag), StandardCharsets.UTF_8).trim().lowercase()
+          val key = "$host|$user"
+
+          val existing = seen[key]
+          if (existing != null) {
+            if (entry.updatedAt > existing.updatedAt) {
+              idsToDelete.add(existing.id)
+              seen[key] = entry
+            } else {
+              idsToDelete.add(entry.id)
+            }
+          } else {
+            seen[key] = entry
           }
         } catch (_: Exception) {}
       }
-    }
 
-    val urlEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, canonicalUrl.toByteArray(StandardCharsets.UTF_8))
-    val userEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, username.toByteArray(StandardCharsets.UTF_8))
-    val passEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, password.toByteArray(StandardCharsets.UTF_8))
-    val notesEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, notes.toByteArray(StandardCharsets.UTF_8))
-
-    val fallbackIv = urlEnc.copyOfRange(0, PasswordCryptoEngine.IV_LENGTH_BYTES)
-    val fallbackAuthTag = urlEnc.copyOfRange(PasswordCryptoEngine.IV_LENGTH_BYTES, PasswordCryptoEngine.IV_LENGTH_BYTES + PasswordCryptoEngine.AUTH_TAG_LENGTH_BYTES)
-
-    val entity = PasswordEntryEntity(
-      id = finalId,
-      siteUrlHash = siteHash,
-      siteUrlEncrypted = urlEnc,
-      usernameEncrypted = userEnc,
-      passwordEncrypted = passEnc,
-      notesEncrypted = notesEnc,
-      createdAt = if (finalId > 0) System.currentTimeMillis() else System.currentTimeMillis(),
-      updatedAt = System.currentTimeMillis(),
-      iv = fallbackIv,
-      authTag = fallbackAuthTag,
-    )
-
-    if (finalId > 0) {
-      getDb().passwordEntryDao().update(entity)
-      return@withContext finalId
-    } else {
-      return@withContext getDb().passwordEntryDao().insert(entity)
+      for (delId in idsToDelete) {
+        getDb().passwordEntryDao().deleteById(delId)
+        Log.i(TAG, "Cleaned up duplicate password entry ID $delId")
+      }
+      return@withLock idsToDelete.size
     }
   }
 

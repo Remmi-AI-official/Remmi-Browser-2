@@ -67,6 +67,56 @@
     return { username, password };
   }
 
+    function isSignUpContext(el) {
+    if (!el) return false;
+    try {
+      const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
+      if (ac === "new-password" || ac.includes("new-password") || ac === "one-time-code") return true;
+
+      const name = (el.name || "").toLowerCase();
+      const id = (el.id || "").toLowerCase();
+      const signupPatterns = [
+        "signup", "sign-up", "register", "registration", "newpass", "new-pass",
+        "new_pass", "confirmpass", "confirm-pass", "confirm_pass", "passwd2",
+        "pass2", "repeatpass", "repeat-pass", "join", "create_account"
+      ];
+      for (let i = 0; i < signupPatterns.length; i++) {
+        const pat = signupPatterns[i];
+        if (name.includes(pat) || id.includes(pat)) return true;
+      }
+
+      const form = el.closest("form") || (el.parentElement ? el.parentElement.closest("div, form, [role='form']") : null);
+      if (form) {
+        const passInputs = form.querySelectorAll('input[type="password"]');
+        if (passInputs.length >= 2) return true;
+
+        const formId = (form.id || "").toLowerCase();
+        const formClass = (form.className || "").toString().toLowerCase();
+        const formAction = (form.action || "").toLowerCase();
+        const formPatterns = ["signup", "sign-up", "register", "registration", "create-account", "create_account", "join"];
+        for (let j = 0; j < formPatterns.length; j++) {
+          const pat = formPatterns[j];
+          if (formId.includes(pat) || formClass.includes(pat) || formAction.includes(pat)) return true;
+        }
+
+        const buttons = form.querySelectorAll('button, input[type="submit"]');
+        for (let k = 0; k < buttons.length; k++) {
+          const btn = buttons[k];
+          const btnText = (btn.innerText || btn.value || "").toLowerCase();
+          if (btnText.includes("sign up") || btnText.includes("signup") || btnText.includes("register") || btnText.includes("create account") || btnText.includes("get started")) {
+            return true;
+          }
+        }
+      }
+
+      const path = (window.location.pathname || "").toLowerCase();
+      if (path.includes("/signup") || path.includes("/sign-up") || path.includes("/register") || path.includes("/registration") || path.includes("/join") || path.includes("/create-account")) {
+        return true;
+      }
+    } catch (_e) {}
+    return false;
+  }
+
   function notifyFocus(isPassword) {
     const now = Date.now();
     if (now - lastFocusTime < 800) return;
@@ -103,10 +153,13 @@
     } catch (_e) {}
   }
 
-  // 1. Detect focus on input fields
+  // 1. Detect focus on input fields (Only Sign-In, NEVER on Sign-Up)
   document.addEventListener("focusin", function (e) {
     const target = e.target;
     if (isRelevantInput(target)) {
+      if (isSignUpContext(target)) {
+        return; // Suppress autofill prompt on sign-up / registration forms
+      }
       notifyFocus((target.type || "").toLowerCase() === "password");
     }
   }, true);

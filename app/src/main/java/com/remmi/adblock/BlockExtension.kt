@@ -649,6 +649,7 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                   Log.d(TAG, wStartMsg)
 
                   val gen = adblockBridge.getEngineGeneration()
+                  Log.i(TAG, "[ADBLOCK_REQUEST_SEEN] url=$url tabId=$tabId type=$resourceType sourceUrl=$sourceUrl gen=$gen")
                   Log.i(TAG, "[ADBLOCK_REQUEST_SEEN]\n$url\n$tabId\n$resourceType\n$sourceUrl\n$gen")
 
                   try {
@@ -689,9 +690,12 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                   }
                   
                   if (decision.blocked) {
+                    Log.i(TAG, "[ADBLOCK_MATCH] url=$url rule=${decision.ruleId} tabId=$tabId")
                     Log.i(TAG, "[ADBLOCK_MATCH]\n${decision.ruleId}\n$url\n$tabId")
+                    Log.i(TAG, "[ADBLOCK_BLOCK] url=$url rule=${decision.ruleId}")
                     Log.i(TAG, "[ADBLOCK_BLOCK]\n$url\nmatched_rule\n${decision.ruleId}")
                   } else {
+                    Log.i(TAG, "[ADBLOCK_ALLOW] url=$url reason=no_match_or_bypassed")
                     Log.i(TAG, "[ADBLOCK_ALLOW]\n$url\nno_match_or_bypassed")
                   }
 
