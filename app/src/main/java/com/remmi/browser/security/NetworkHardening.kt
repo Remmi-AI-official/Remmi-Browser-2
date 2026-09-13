@@ -114,7 +114,7 @@ object NetworkHardening {
       "general.smoothScroll.msdPhysics.continuousMode" to true,
       "apz.overscroll.enabled" to true,
       "apz.allow_zooming" to true,
-      "apz.paint_skipping.enabled" to false,
+      "apz.paint_skipping.enabled" to true,
       "apz.velocity_bias" to "1.0",
       "layout.css.touch_action.enabled" to true,
       "layout.css.scroll-behavior.enabled" to true,
