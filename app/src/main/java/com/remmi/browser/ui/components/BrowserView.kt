@@ -92,6 +92,7 @@ fun BrowserView(
   var lastNavigatedUrl by remember(tab.id) { mutableStateOf(geckoEngine.getLastDispatchedUrl(tab.id) ?: "") }
   var isAttachingOrAttached by remember(tab.id) { mutableStateOf(false) }
   val isViewAttached by geckoEngine.getViewAttachmentState(tab.id).collectAsState()
+  val presentationState by geckoEngine.getPresentationStateFlow(tab.id).collectAsState()
 
   val currentOnUrlChange by rememberUpdatedState(onUrlChange)
   val currentOnTitleChange by rememberUpdatedState(onTitleChange)
@@ -109,6 +110,11 @@ fun BrowserView(
   val tabCallbacks = remember(tab.id, tab.profile) {
     object : GeckoTabCallbacks {
       override fun onUrlChange(url: String) {
+        val isBlank = url.isBlank() || url == "about:blank" || url == "remmi://newtab" || url == "about:home"
+        if (isBlank && geckoEngine.isRealNavigationInProgress(tab.id)) {
+          Log.i("BrowserView", "[FORENSIC][SUPPRESS_TRANSIENT_BLANK_CALLBACK] tabId=${tab.id} url=$url suppressed during REAL_NAVIGATION_IN_PROGRESS")
+          return
+        }
         lastNavigatedUrl = url
         currentOnUrlChange(url)
       }
@@ -133,6 +139,10 @@ fun BrowserView(
       }
 
       override fun onLoadingChange(isLoading: Boolean) {
+        if (!isLoading && geckoEngine.isRealNavigationInProgress(tab.id)) {
+          Log.i("BrowserView", "[FORENSIC][SUPPRESS_TRANSIENT_LOADING_STOP] tabId=${tab.id} isLoading=false suppressed during REAL_NAVIGATION_IN_PROGRESS")
+          return
+        }
         isCurrentlyLoading = isLoading
         currentOnLoadingChange(isLoading)
         if (isLoading) {
@@ -140,13 +150,13 @@ fun BrowserView(
         } else {
           progressFloat = 0f
           android.util.Log.i("AppStartup", "STATE_LOG: FIRST_PAGE_STOP (time=${android.os.SystemClock.elapsedRealtime()})")
-          // Page load completed, capture preview thumbnail safely if it's a real web page
-          val isRealWebUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
-          if (isRealWebUrl) {
-            geckoViewRef?.let { gv ->
-              com.remmi.browser.engine.TabThumbnailManager.getInstance(context).captureGeckoView(tab.id, gv)
-            }
-          }
+          // Isolation step: disabled automatic thumbnail capture on page stop to prevent capturePixels() from blocking or causing flicker
+          // val isRealWebUrl = tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
+          // if (isRealWebUrl) {
+          //   geckoViewRef?.let { gv ->
+          //     com.remmi.browser.engine.TabThumbnailManager.getInstance(context).captureGeckoView(tab.id, gv)
+          //   }
+          // }
         }
       }
 
@@ -290,9 +300,10 @@ fun BrowserView(
     // causes the Compose tree to swap and the GeckoView to blink.
     val isTransientBlankForRealTarget =
       (tab.url == "about:blank" || tab.url == "remmi://newtab" || tab.url == "about:home" || tab.url.isBlank()) &&
-      !currentDispatched.isNullOrBlank() &&
-      !geckoEngine.isInternalOrIgnoredUrl(currentDispatched) &&
-      currentDispatched != tab.url
+      (geckoEngine.isRealNavigationInProgress(tab.id) ||
+       (!currentDispatched.isNullOrBlank() &&
+        !geckoEngine.isInternalOrIgnoredUrl(currentDispatched) &&
+        currentDispatched != tab.url))
     if (isTransientBlankForRealTarget) {
       Log.i("BrowserView", "[FORENSIC][SKIP_TRANSIENT_BLANK_LOAD] tabId=${tab.id} tabUrl=${tab.url} dispatchedUrl=$currentDispatched")
       return@LaunchedEffect

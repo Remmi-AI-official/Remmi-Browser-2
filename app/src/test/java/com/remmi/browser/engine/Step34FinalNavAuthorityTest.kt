@@ -410,4 +410,111 @@ class Step34FinalNavAuthorityTest {
       it.contains("[POST_NAV_FAILURE_CONFIRMED]") && it.contains("failure=PAGE_STOP_FAILED")
     })
   }
+
+  @Test
+  fun testDuplicateNavigation_userGestureOnLoadRequest_whenInFlightOrDispatched_doesNotAllocateSecondGeneration() = runBlocking {
+    val tab = tabManager.createTab("about:blank")
+    val tabId = tab.id
+    val settings = GeckoSessionSettings.Builder().usePrivateMode(true).build()
+    val session = GeckoSession(settings)
+    manager.setSessionForTesting(tabId, session)
+
+    val loadedUrls = mutableListOf<String>()
+    manager.uriLoaderForTest = { _, _, url -> loadedUrls.add(url) }
+
+    val geckoView = GeckoView(context).apply { tag = tabId }
+    manager.attachView(
+      tabId = tabId,
+      geckoView = geckoView,
+      profile = PrivacyProfile.SHIELD,
+      isDesktopMode = false,
+      callbacks = testCallbacks,
+    )
+
+    val targetUrl = "https://example.com/dashboard"
+    DebugLogManager.clear()
+
+    // 1. App initiates navigation via loadUrl
+    manager.loadUrl(tabId, targetUrl)
+    val initialNavId = manager.getActiveNavId(tabId)
+    val initialGen = manager.getNavGeneration(tabId)
+    assertEquals(1, loadedUrls.size)
+
+    // 2. Gecko fires onLoadRequest for the same target URL with user gesture
+    val loadRequestExact = makeLoadRequest(
+      targetUrl,
+      isRedirect = false,
+      hasUserGesture = true
+    )
+    session.navigationDelegate?.onLoadRequest(session, loadRequestExact)
+
+    assertEquals("NavId must not change when onLoadRequest has user gesture for in-flight URL", initialNavId, manager.getActiveNavId(tabId))
+    assertEquals("Generation must not change when onLoadRequest has user gesture for in-flight URL", initialGen, manager.getNavGeneration(tabId))
+
+    // 3. Gecko fires onLoadRequest with normalized trailing slash and user gesture
+    val loadRequestTrailingSlash = makeLoadRequest(
+      "$targetUrl/",
+      isRedirect = false,
+      hasUserGesture = true
+    )
+    session.navigationDelegate?.onLoadRequest(session, loadRequestTrailingSlash)
+
+    assertEquals("NavId must not change when onLoadRequest has user gesture for equivalent URL", initialNavId, manager.getActiveNavId(tabId))
+    assertEquals("Generation must not change when onLoadRequest has user gesture for equivalent URL", initialGen, manager.getNavGeneration(tabId))
+
+    // 4. Repeated user-gesture onLoadRequest callbacks must never allocate a second generation
+    val logs = DebugLogManager.getCurrentSessionEvents()
+    val allocationCount = logs.count { it.contains("[NAV_ALLOCATION]") }
+    assertEquals("Exactly one navigation allocation must occur", 1, allocationCount)
+    assertTrue("Must emit [NAV_CORRELATION] with correlated_to_inflight_intent", logs.any {
+      it.contains("[NAV_CORRELATION]") && it.contains("reason=correlated_to_inflight_intent")
+    })
+  }
+
+  @Test
+  fun testDuplicateNavigation_repeatedLoadUrl_performsExactlyOneLoadUriAndOneGeneration() = runBlocking {
+    val tab = tabManager.createTab("about:blank")
+    val tabId = tab.id
+    val settings = GeckoSessionSettings.Builder().usePrivateMode(true).build()
+    val session = GeckoSession(settings)
+    manager.setSessionForTesting(tabId, session)
+
+    val loadedUrls = mutableListOf<String>()
+    manager.uriLoaderForTest = { _, _, url -> loadedUrls.add(url) }
+
+    val geckoView = GeckoView(context).apply { tag = tabId }
+    manager.attachView(
+      tabId = tabId,
+      geckoView = geckoView,
+      profile = PrivacyProfile.SHIELD,
+      isDesktopMode = false,
+      callbacks = testCallbacks,
+    )
+
+    val targetUrl = "https://example.com/feed"
+    DebugLogManager.clear()
+
+    // First loadUrl
+    manager.loadUrl(tabId, targetUrl)
+    val initialNavId = manager.getActiveNavId(tabId)
+    val initialGen = manager.getNavGeneration(tabId)
+    assertEquals("First loadUrl must invoke loadUri exactly once", 1, loadedUrls.size)
+
+    // Repeated identical loadUrl (e.g. rapid taps or recompositions)
+    manager.loadUrl(tabId, targetUrl)
+    assertEquals("Duplicate loadUrl must NOT invoke loadUri again", 1, loadedUrls.size)
+    assertEquals("Duplicate loadUrl must NOT allocate a second navId", initialNavId, manager.getActiveNavId(tabId))
+    assertEquals("Duplicate loadUrl must NOT allocate a second generation", initialGen, manager.getNavGeneration(tabId))
+
+    // Repeated equivalent loadUrl with trailing slash
+    manager.loadUrl(tabId, "$targetUrl/")
+    assertEquals("Equivalent duplicate loadUrl must NOT invoke loadUri again", 1, loadedUrls.size)
+    assertEquals("Equivalent duplicate loadUrl must NOT allocate a second navId", initialNavId, manager.getActiveNavId(tabId))
+    assertEquals("Equivalent duplicate loadUrl must NOT allocate a second generation", initialGen, manager.getNavGeneration(tabId))
+
+    val logs = DebugLogManager.getCurrentSessionEvents()
+    val allocationCount = logs.count { it.contains("[NAV_ALLOCATION]") }
+    assertEquals("Exactly one navigation allocation must occur across repeated calls", 1, allocationCount)
+    assertTrue("Must log skipped duplicate", logs.any { it.contains("[GECKO_NAV_SKIPPED_DUPLICATE]") })
+  }
 }

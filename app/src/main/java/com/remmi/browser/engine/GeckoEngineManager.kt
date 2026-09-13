@@ -242,7 +242,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
     assertMainThread("getOrCreateGeckoView id=$tabId")
     val existing = geckoViewPool[tabId]
     if (existing != null) {
-      (existing.parent as? android.view.ViewGroup)?.removeView(existing)
       return existing
     }
     val newView = GeckoView(context).apply {
@@ -264,6 +263,57 @@ class GeckoEngineManager private constructor(private val context: Context) {
   private val attachingTabs = mutableSetOf<String>()
   private val _viewAttachmentStates = mutableMapOf<String, MutableStateFlow<Boolean>>()
   private val _documentRenderedStates = mutableMapOf<String, MutableStateFlow<Boolean>>()
+
+  enum class PresentationState {
+    IDLE,
+    REAL_NAVIGATION_IN_PROGRESS,
+    TARGET_PRESENTED
+  }
+
+  private val presentationStates = java.util.concurrent.ConcurrentHashMap<String, PresentationState>()
+  private val presentationNavIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+  private val presentationGenerations = java.util.concurrent.ConcurrentHashMap<String, Long>()
+  private val presentationTargetUrls = java.util.concurrent.ConcurrentHashMap<String, String>()
+  private val tabPresentationFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<PresentationState>>()
+
+  fun getPresentationState(tabId: String): PresentationState {
+    return presentationStates[tabId] ?: PresentationState.IDLE
+  }
+
+  fun getPresentationStateFlow(tabId: String): StateFlow<PresentationState> {
+    return tabPresentationFlows.getOrPut(tabId) { MutableStateFlow(presentationStates[tabId] ?: PresentationState.IDLE) }.asStateFlow()
+  }
+
+  private fun updatePresentationState(tabId: String, state: PresentationState) {
+    presentationStates[tabId] = state
+    tabPresentationFlows.getOrPut(tabId) { MutableStateFlow(state) }.value = state
+  }
+
+  fun isRealNavigationInProgress(tabId: String): Boolean {
+    return presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS
+  }
+
+  fun markTargetPresented(tabId: String, navId: Long, gen: Long, reason: String) {
+    if (presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS) {
+      if (presentationNavIds[tabId] == navId && presentationGenerations[tabId] == gen) {
+        updatePresentationState(tabId, PresentationState.TARGET_PRESENTED)
+        val targetUrl = presentationTargetUrls[tabId] ?: lastDispatchedUrls[tabId] ?: ""
+        val validFrameMsg = "[FORENSIC][NAV_FIRST_VALID_FRAME] tabId=$tabId navId=$navId generation=$gen url=$targetUrl"
+        Log.i(TAG, validFrameMsg)
+        com.remmi.browser.util.DebugLogManager.log(validFrameMsg)
+      }
+    }
+  }
+
+  fun endVisualNavigation(tabId: String, navId: Long, gen: Long, result: String) {
+    val currentState = presentationStates[tabId]
+    if (currentState != null && currentState != PresentationState.IDLE) {
+      val endMsg = "[FORENSIC][NAV_VISUAL_END] tabId=$tabId navId=$navId generation=$gen result=$result"
+      Log.i(TAG, endMsg)
+      com.remmi.browser.util.DebugLogManager.log(endMsg)
+      updatePresentationState(tabId, PresentationState.IDLE)
+    }
+  }
 
   data class NavigationPaintGuard(
     val tabId: String,
@@ -323,6 +373,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       val msg = "[FORENSIC][FIRST_COMPOSITE] tabId=$tabId session=$sessId elapsedRealtime=$now"
       Log.i(TAG, msg)
       com.remmi.browser.util.DebugLogManager.log(msg)
+      markTargetPresented(tabId, navId, gen, "first_composite")
       try {
         sessionCallbacks[tabId]?.onFirstComposite()
       } catch (t: Throwable) {
@@ -343,6 +394,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       val msg = "[FORENSIC][FIRST_CONTENTFUL_PAINT] tabId=$tabId session=$sessId elapsedRealtime=$now"
       Log.i(TAG, msg)
       com.remmi.browser.util.DebugLogManager.log(msg)
+      markTargetPresented(tabId, navId, gen, "first_contentful_paint")
       try {
         sessionCallbacks[tabId]?.onFirstContentfulPaint()
       } catch (t: Throwable) {
@@ -372,6 +424,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
   private val activeRecoveries = mutableMapOf<String, ActiveRecovery>()
   private val recoveryStates = mutableMapOf<String, RecoveryState>()
   private val inFlightNavigations = mutableMapOf<String, Long>()
+  private val inFlightUrls = mutableMapOf<String, String>()
+  private val lastDispatchedTimes = mutableMapOf<String, Long>()
   private val lastDispatchedUrls = mutableMapOf<String, String>()
   private val lastObservedUrls = mutableMapOf<String, String>()
   private val latestProgressUrls = mutableMapOf<String, String>()
@@ -586,12 +640,30 @@ class GeckoEngineManager private constructor(private val context: Context) {
   ): Pair<Long, Long> {
     val previousNavId = currentNavIds[tabId] ?: 0L
     val previousGeneration = navGenerations[tabId] ?: 0L
+    if (presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS) {
+      endVisualNavigation(tabId, previousNavId, previousGeneration, "SUPERSEDED")
+    }
+
     val newNavId = navIdCounter.incrementAndGet()
     val newGen = previousGeneration + 1L
     currentNavIds[tabId] = newNavId
     navGenerations[tabId] = newGen
     inFlightNavigations[tabId] = newNavId
+    inFlightUrls[tabId] = url
     lastRecoveredGenerations.remove(tabId)
+
+    val isRealWebUrl = url.isNotBlank() && !isInternalOrIgnoredUrl(url) && url != "about:blank" && url != "remmi://newtab" && url != "about:home"
+    if (isRealWebUrl) {
+      updatePresentationState(tabId, PresentationState.REAL_NAVIGATION_IN_PROGRESS)
+      presentationNavIds[tabId] = newNavId
+      presentationGenerations[tabId] = newGen
+      presentationTargetUrls[tabId] = url
+      val visualStartMsg = "[FORENSIC][NAV_VISUAL_START] tabId=$tabId navId=$newNavId generation=$newGen targetUrl=$url"
+      Log.i(TAG, visualStartMsg)
+      com.remmi.browser.util.DebugLogManager.log(visualStartMsg)
+    } else {
+      updatePresentationState(tabId, PresentationState.IDLE)
+    }
 
     logNavIntent(tabId, newNavId, newGen, trigger, url)
     logNavAllocation(
@@ -880,6 +952,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
   fun getLastDispatchedUrl(tabId: String): String? = lastDispatchedUrls[tabId]
   fun getLastObservedUrl(tabId: String): String? = lastObservedUrls[tabId]
   fun isInFlight(tabId: String): Boolean = inFlightNavigations.containsKey(tabId) || (navLoadingStates[tabId] == true)
+  fun getInFlightUrl(tabId: String): String? = inFlightUrls[tabId]
+  fun getLastDispatchedTime(tabId: String): Long? = lastDispatchedTimes[tabId]
   fun getNavGeneration(tabId: String): Long = navGenerations[tabId] ?: 0L
   fun getLastRecoveredGeneration(tabId: String): Long? = lastRecoveredGenerations[tabId]
   fun getDispatchedNavigations(tabId: String): List<String> = dispatchedNavigationsHistory[tabId]?.toList() ?: emptyList()
@@ -934,6 +1008,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     if (url1.isNullOrBlank() || url2.isNullOrBlank()) return false
     if (isInternalOrIgnoredUrl(url1) || isInternalOrIgnoredUrl(url2)) return false
     if (url1 == url2) return true
+    if (url1.trim().trimEnd('/') == url2.trim().trimEnd('/')) return true
 
     val uri1 = parseUri(url1) ?: return false
     val uri2 = parseUri(url2) ?: return false
@@ -969,18 +1044,47 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val query1 = uri1.query
     val query2 = uri2.query
     if (query1 != query2) {
-      if (query1 == null || query2 == null) return false
-      val names1 = try { uri1.queryParameterNames } catch (_: Exception) { null }
-      val names2 = try { uri2.queryParameterNames } catch (_: Exception) { null }
-      if (names1 == null || names2 == null || names1 != names2) return false
-      for (name in names1) {
-        val vals1 = uri1.getQueryParameters(name)
-        val vals2 = uri2.getQueryParameters(name)
-        if (vals1 != vals2) return false
+      if (query1.isNullOrEmpty() && query2.isNullOrEmpty()) {
+        // Both empty or null
+      } else {
+        if (query1 == null || query2 == null) return false
+        val names1 = try { uri1.queryParameterNames } catch (_: Exception) { null }
+        val names2 = try { uri2.queryParameterNames } catch (_: Exception) { null }
+        if (names1 == null || names2 == null || names1 != names2) return false
+        for (name in names1) {
+          val vals1 = uri1.getQueryParameters(name)
+          val vals2 = uri2.getQueryParameters(name)
+          if (vals1 != vals2) return false
+        }
       }
     }
 
     return true
+  }
+
+  @VisibleForTesting
+  internal fun isSameTargetUrl(tabId: String, url: String?): Boolean {
+    if (url.isNullOrBlank() || isInternalOrIgnoredUrl(url)) return false
+    val inFlightUrl = inFlightUrls[tabId]
+    if (inFlightUrl != null && (inFlightUrl == url || areUrlsEquivalent(inFlightUrl, url))) {
+      return true
+    }
+    val lastDispatched = lastDispatchedUrls[tabId]
+    if (lastDispatched != null && (lastDispatched == url || areUrlsEquivalent(lastDispatched, url))) {
+      return true
+    }
+    val pending = pendingNavigations[tabId]?.url
+    if (pending != null && (pending == url || areUrlsEquivalent(pending, url))) {
+      return true
+    }
+    val history = dispatchedNavigationsHistory[tabId]
+    if (history != null) {
+      val recent = history.takeLast(5)
+      if (recent.any { it == url || areUrlsEquivalent(it, url) }) {
+        return true
+      }
+    }
+    return false
   }
 
   @VisibleForTesting
@@ -1642,24 +1746,48 @@ class GeckoEngineManager private constructor(private val context: Context) {
           logNavAllocationRejected(tabId, navId, gen, url, "onLoadRequest", "internal_or_ignored")
         } else {
           val isInFlight = inFlightNavigations.containsKey(tabId)
+          val inFlightUrl = inFlightUrls[tabId]
           val prevDispatched = lastDispatchedUrls[tabId]
           val prevObserved = lastObservedUrls[tabId]
+          val lastDispTime = lastDispatchedTimes[tabId] ?: 0L
+          val isRecentlyDispatched = (now - lastDispTime) < 5000L
+          val isBackOrForward = inFlightUrl == "history_back" || inFlightUrl == "history_forward"
           val isEquivalentToDispatched = areUrlsEquivalent(prevDispatched, url)
+          val isEquivalentToInFlight = areUrlsEquivalent(inFlightUrl, url)
           val isEquivalentToObserved = areUrlsEquivalent(prevObserved, url)
-          val isSameUrl = isEquivalentToDispatched || isEquivalentToObserved
+          val isSameTarget = isEquivalentToDispatched || isEquivalentToInFlight || isSameTargetUrl(tabId, url)
+          val isSameUrl = isSameTarget || isEquivalentToObserved
 
           if (request.isRedirect) {
+            val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$navId gen=$gen url=$url reason=redirect"
+            Log.i(TAG, corrMsg)
+            com.remmi.browser.util.DebugLogManager.log(corrMsg)
+            lastDispatchedUrls[tabId] = url
+            presentationTargetUrls[tabId] = url
             logNavCorrelation(tabId, navId, gen, url, "onLoadRequest", "redirect")
-          } else if (isInFlight && (isSameUrl || isEquivalentToDispatched)) {
-            // Belongs to the existing in-flight app navigation intent (e.g. loadUrl, reload, etc.)
+          } else if (isSameTarget || (isInFlight && (isSameUrl || isEquivalentToDispatched || isBackOrForward || isRecentlyDispatched))) {
+            // Belongs to the existing in-flight app navigation intent (e.g. loadUrl, reload, back, forward)
+            // One real user navigation = one logical navigation generation = one navId = one actual load dispatch
+            val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$navId gen=$gen url=$url reason=inflight_target"
+            Log.i(TAG, corrMsg)
+            com.remmi.browser.util.DebugLogManager.log(corrMsg)
+            lastDispatchedUrls[tabId] = url
+            presentationTargetUrls[tabId] = url
             logNavCorrelation(tabId, navId, gen, url, "onLoadRequest", "correlated_to_inflight_intent")
           } else if (isSameUrl && !request.hasUserGesture) {
+            val dupMsg = "[FORENSIC][NAV_DUPLICATE_SUPPRESSED] tabId=$tabId navId=$navId gen=$gen url=$url reason=same_url_no_gesture"
+            Log.i(TAG, dupMsg)
+            com.remmi.browser.util.DebugLogManager.log(dupMsg)
             logNavCorrelation(tabId, navId, gen, url, "onLoadRequest", "duplicate_or_same_url")
           } else if (request.hasUserGesture && !isSameUrl) {
             // Genuine user-gesture link click from inside the page!
             val prevUrl = prevObserved ?: prevDispatched
             lastDispatchedUrls[tabId] = url
             val (newNavId, newGen) = allocateNavigationGeneration(tabId, "USER_GESTURE", url)
+            val newRealMsg = "[FORENSIC][NAV_NEW_REAL] tabId=$tabId navId=$newNavId gen=$newGen url=$url trigger=USER_GESTURE"
+            Log.i(TAG, newRealMsg)
+            com.remmi.browser.util.DebugLogManager.log(newRealMsg)
+
             val inPageMsg = "[FORENSIC][IN_PAGE_NAV] tabId=$tabId session=$sessId view=$viewId navId=$newNavId url=$url prevUrl=$prevUrl newGen=$newGen trigger=onLoadRequest hasUserGesture=${request.hasUserGesture} elapsedRealtime=$now"
             Log.i(TAG, inPageMsg)
             com.remmi.browser.util.DebugLogManager.log(inPageMsg)
@@ -1878,6 +2006,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
                                  activeDispatched == "remmi://newtab" ||
                                  activeDispatched == "about:home"
         val isNavigatingRealUrl = inFlightNavigations.containsKey(tabId) || 
+                                  presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS ||
+                                  (navLoadingStates[tabId] == true && !isIntentionalBlank) ||
                                   (!activeDispatched.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatched))
 
         val prevObserved = lastObservedUrls[tabId]
@@ -1925,7 +2055,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
               checkPostNavFailure(tabId, "ABOUT_BLANK", "about:blank")
             }
             if (!isIntentionalBlank && isNavigatingRealUrl) {
-              val transMsg = "[FORENSIC][SUPPRESS_TRANSIENT_ABOUT_BLANK] tabId=$tabId targetUrl=$activeDispatched elapsedRealtime=$now"
+              val transMsg = "[FORENSIC][NAV_TRANSIENT_BLANK] tabId=$tabId navId=$activeNavId generation=$genBefore action=KEEP_EXISTING_SURFACE targetUrl=$activeDispatched elapsedRealtime=$now"
               Log.i(TAG, transMsg)
               com.remmi.browser.util.DebugLogManager.log(transMsg)
               logRecoveryUrlState(tabId, activeNavId, genBefore, url, false, null, "TRANSIENT_ABOUT_BLANK", "SUPPRESS_LOCATION_UPDATE")
@@ -1945,6 +2075,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
           val isSameAsObserved = areUrlsEquivalent(prevObserved, url)
           val hostChanged = isDifferentHost(prevObserved ?: prevDispatched, url)
           val isInFlight = inFlightNavigations.containsKey(tabId)
+          val inFlightUrl = inFlightUrls[tabId]
+          val isBackOrForward = inFlightUrl == "history_back" || inFlightUrl == "history_forward"
 
           val classification: String
           var genAfter: Long = genBefore
@@ -1953,19 +2085,43 @@ class GeckoEngineManager private constructor(private val context: Context) {
             classification = "APP_REQUEST_MATCH"
             lastDispatchedUrls[tabId] = url
             inFlightNavigations.remove(tabId)
+            inFlightUrls.remove(tabId)
+            val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$activeNavId gen=$genBefore url=$url reason=app_request_match"
+            Log.i(TAG, corrMsg)
+            com.remmi.browser.util.DebugLogManager.log(corrMsg)
             logNavCorrelation(tabId, activeNavId, genBefore, url, "onLocationChange", "app_request_match")
+          } else if (isBackOrForward) {
+            classification = "HISTORY_NAVIGATION_MATCH"
+            lastDispatchedUrls[tabId] = url
+            inFlightNavigations.remove(tabId)
+            inFlightUrls.remove(tabId)
+            val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$activeNavId gen=$genBefore url=$url reason=history_navigation"
+            Log.i(TAG, corrMsg)
+            com.remmi.browser.util.DebugLogManager.log(corrMsg)
+            logNavCorrelation(tabId, activeNavId, genBefore, url, "onLocationChange", "history_navigation")
           } else if (isSameAsObserved) {
             classification = "DUPLICATE_OBSERVATION"
             lastDispatchedUrls[tabId] = url
+            val dupMsg = "[FORENSIC][NAV_DUPLICATE_SUPPRESSED] tabId=$tabId navId=$activeNavId gen=$genBefore url=$url reason=duplicate_observation"
+            Log.i(TAG, dupMsg)
+            com.remmi.browser.util.DebugLogManager.log(dupMsg)
             logNavCorrelation(tabId, activeNavId, genBefore, url, "onLocationChange", "duplicate_observation")
           } else if (lastRedirectUrls[tabId] != null && areUrlsEquivalent(lastRedirectUrls[tabId], url)) {
             classification = "REDIRECT"
             lastDispatchedUrls[tabId] = url
+            presentationTargetUrls[tabId] = url
+            val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$activeNavId gen=$genBefore url=$url reason=redirect"
+            Log.i(TAG, corrMsg)
+            com.remmi.browser.util.DebugLogManager.log(corrMsg)
             logNavCorrelation(tabId, activeNavId, genBefore, url, "onLocationChange", "redirect")
           } else if (isInFlight) {
             // Continuation / redirect / location resolution for existing in-flight navigation (prevent duplicate navId)
             classification = "IN_FLIGHT_LOCATION_MATCH"
             lastDispatchedUrls[tabId] = url
+            presentationTargetUrls[tabId] = url
+            val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$activeNavId gen=$genBefore url=$url reason=in_flight_location_match"
+            Log.i(TAG, corrMsg)
+            com.remmi.browser.util.DebugLogManager.log(corrMsg)
             logNavCorrelation(tabId, activeNavId, genBefore, url, "onLocationChange", "in_flight_location_match")
           } else if (!hostChanged && !hasUserGesture) {
             // Same-host SPA / script history change (e.g. DuckDuckGo replaceState / pushState)
@@ -1987,6 +2143,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
             val (newNavId, newGen) = allocateNavigationGeneration(tabId, if (hasUserGesture) "USER_GESTURE" else "LOCATION_CHANGED", url)
             genAfter = newGen
             classification = if (hasUserGesture) "GENUINE_NEW_NAVIGATION" else "LOCATION_CHANGED"
+            val newRealMsg = "[FORENSIC][NAV_NEW_REAL] tabId=$tabId navId=$newNavId gen=$newGen url=$url trigger=onLocationChange"
+            Log.i(TAG, newRealMsg)
+            com.remmi.browser.util.DebugLogManager.log(newRealMsg)
             val inPageMsg = "[FORENSIC][IN_PAGE_NAV] tabId=$tabId session=$sessId view=$viewId navId=$newNavId url=$url prevUrl=$prevUrl newGen=$newGen trigger=onLocationChange hasUserGesture=$hasUserGesture elapsedRealtime=$now"
             Log.i(TAG, inPageMsg)
             com.remmi.browser.util.DebugLogManager.log(inPageMsg)
@@ -2015,10 +2174,12 @@ class GeckoEngineManager private constructor(private val context: Context) {
                                        activeDispatchedUrl == "remmi://newtab" ||
                                        activeDispatchedUrl == "about:home"
               val isNavigatingRealUrl = inFlightNavigations.containsKey(tabId) || 
+                                        presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS ||
+                                        (navLoadingStates[tabId] == true && !isIntentionalBlank) ||
                                         (!activeDispatchedUrl.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatchedUrl))
 
               if (!isIntentionalBlank && isNavigatingRealUrl) {
-                val transMsg = "[FORENSIC][SUPPRESS_TRANSIENT_ABOUT_BLANK_CALLBACK] tabId=$tabId targetUrl=$activeDispatchedUrl"
+                val transMsg = "[FORENSIC][NAV_TRANSIENT_BLANK] tabId=$tabId navId=${getActiveNavId(tabId)} generation=${getNavGeneration(tabId)} action=KEEP_EXISTING_SURFACE targetUrl=$activeDispatchedUrl"
                 Log.i(TAG, transMsg)
                 com.remmi.browser.util.DebugLogManager.log(transMsg)
               } else {
@@ -2155,6 +2316,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
         com.remmi.browser.util.DebugLogManager.log(stopMsg)
 
         inFlightNavigations.remove(tabId)
+        inFlightUrls.remove(tabId)
         getMemoryForensicSnapshot("NAV_STOP")
 
         if (success) {
@@ -2175,6 +2337,13 @@ class GeckoEngineManager private constructor(private val context: Context) {
         }
         if (latestProg == "about:blank" || isInternalOrIgnoredUrl(latestProg)) {
           latestProgressUrls.remove(tabId)
+        }
+
+        if (presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS && isAboutBlank) {
+          val transStopMsg = "[FORENSIC][NAV_TRANSIENT_STOP] tabId=$tabId navId=$navId gen=$gen currUrl=$currUrl action=IGNORE_STOP_DURING_REAL_NAV"
+          Log.i(TAG, transStopMsg)
+          com.remmi.browser.util.DebugLogManager.log(transStopMsg)
+          return
         }
 
         val isRecoveryActive = activeRecovery != null && 
@@ -2210,6 +2379,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
             val oldProg = navProgressStates[tabId] ?: 0
             navLoadingStates[tabId] = false
             navProgressStates[tabId] = 0
+            markTargetPresented(tabId, navId, gen, "recovery_success")
+            endVisualNavigation(tabId, navId, gen, "SUCCESS")
             logProgressState(tabId, navId, gen, "NAV_STOP", oldProg, 0, false, true, "recovery_success")
             logRecoveryUrlState(tabId, navId, gen, currUrl, false, activeRecovery.targetUrl, "RECOVERY_TARGET", "FINALIZE_SUCCESS")
 
@@ -2229,6 +2400,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
             val oldProg = navProgressStates[tabId] ?: 0
             navLoadingStates[tabId] = false
             navProgressStates[tabId] = 0
+            endVisualNavigation(tabId, navId, gen, "FAILED")
             logProgressState(tabId, navId, gen, "NAV_STOP", oldProg, 0, false, true, "recovery_failed")
             logRecoveryUrlState(tabId, navId, gen, currUrl, false, activeRecovery.targetUrl, "RECOVERY_TARGET", "FINALIZE_FAILED")
 
@@ -2255,7 +2427,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
         navProgressStates[tabId] = 0
         if (success && !isAboutBlank) {
           _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(true) }.value = true
+          markTargetPresented(tabId, navId, gen, "page_stop_success")
         }
+        endVisualNavigation(tabId, navId, gen, if (success) "SUCCESS" else "FAILED")
         logProgressState(tabId, navId, gen, "NAV_STOP", oldProg, 0, false, true, "navigation_complete")
 
         sessionCallbacks[tabId]?.onLoadingChange(false)
@@ -2286,6 +2460,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
         navProgressStates[tabId] = newProg
         if (newProg >= 70 && !isInternalOrIgnoredUrl(currUrl) && currUrl != "about:blank") {
           _documentRenderedStates.getOrPut(tabId) { MutableStateFlow(true) }.value = true
+          markTargetPresented(tabId, navId, gen, "progress_threshold")
         }
         logProgressState(tabId, navId, gen, "NAV_PROGRESS", oldProg, newProg, true, true, "progress_update")
 
@@ -2342,6 +2517,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val currUrl = lastDispatchedUrls[tabId] ?: "unknown"
         val gen = navGenerations[tabId] ?: 0L
         val navId = getActiveNavId(tabId)
+        endVisualNavigation(tabId, navId, gen, "CRASH")
         val isOpen = session.isOpen
         val threadName = Thread.currentThread().name
         val now = android.os.SystemClock.elapsedRealtime()
@@ -2547,8 +2723,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val navId = pending.navId
     currentNavIds[tabId] = navId
     
-    val isRecoveryActive = activeRecoveries.containsKey(tabId) || pendingContentRecoveries.containsKey(tabId)
-    val isActualDuplicate = (lastDispatchedUrls[tabId] == pending.url) && !isRecoveryActive
+    val isRecoveryActive = (activeRecoveries.containsKey(tabId) || pendingContentRecoveries.containsKey(tabId))
+    val isActualDuplicate = (lastDispatchedUrls[tabId] == pending.url || areUrlsEquivalent(lastDispatchedUrls[tabId], pending.url)) && !isRecoveryActive
 
     if (isActualDuplicate) {
       val skipMsg = "[FORENSIC] [GECKO_NAV_SKIPPED_DUPLICATE] tabId=$tabId session=$sessId view=$viewId navId=$navId gen=${pending.generation} url=${pending.url} thread=$threadName"
@@ -2558,6 +2734,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     }
     
     lastDispatchedUrls[tabId] = pending.url
+    inFlightUrls[tabId] = pending.url
     dispatchedNavigationsHistory.getOrPut(tabId) { mutableListOf() }.add(pending.url)
     val dispatchMsg = "[FORENSIC] [GECKO_NAV_DISPATCH] tabId=$tabId session=$sessId view=$viewId navId=$navId gen=${pending.generation} url=${pending.url} thread=$threadName"
     Log.i(TAG, dispatchMsg)
@@ -3155,9 +3332,55 @@ class GeckoEngineManager private constructor(private val context: Context) {
     }
     assertMainThread("LOAD_URL id=$tabId")
     android.util.Log.i(TAG, "STATE_LOG: FIRST_PAGE_START (time=${android.os.SystemClock.elapsedRealtime()})")
-    
+
+    val activeRecovery = activeRecoveries[tabId]
+    val isRecoveryActive = activeRecovery != null || pendingContentRecoveries.containsKey(tabId)
+    val inFlightUrl = inFlightUrls[tabId]
+    val isInFlight = inFlightNavigations.containsKey(tabId)
+    val prevDispatched = lastDispatchedUrls[tabId]
+    val isAlreadyInFlightSameTarget = isInFlight && inFlightUrl != null && (inFlightUrl == targetUrl || areUrlsEquivalent(inFlightUrl, targetUrl))
+    val isAlreadyDispatchedSameTarget = prevDispatched != null && (prevDispatched == targetUrl || areUrlsEquivalent(prevDispatched, targetUrl))
+    val isPendingSameTarget = pendingNavigations[tabId]?.let { it.url == targetUrl || areUrlsEquivalent(it.url, targetUrl) } == true
+
+    val isActualDuplicate = !forceReload && (isAlreadyInFlightSameTarget || isAlreadyDispatchedSameTarget || isPendingSameTarget) && !isRecoveryActive
+
+    if (isActualDuplicate) {
+      val existingNavId = getActiveNavId(tabId)
+      val existingGen = navGenerations[tabId] ?: 0L
+      val session = activeSessions[tabId]
+      val currentSessId = session?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
+      val currentViewId = attachedViews[tabId]?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
+      val threadName = Thread.currentThread().name
+
+      logNavDuplicateClassification(
+        tabId = tabId,
+        navId = existingNavId,
+        generation = existingGen,
+        previousNavId = existingNavId,
+        previousGeneration = existingGen,
+        classification = "APP_LOAD_URL",
+        trigger = "loadUrl",
+        reason = "url_already_dispatched"
+      )
+      logNavAllocationRejected(
+        tabId = tabId,
+        navId = existingNavId,
+        generation = existingGen,
+        url = targetUrl,
+        trigger = "loadUrl",
+        reason = "url_already_dispatched"
+      )
+      val skipMsg = "[FORENSIC] [GECKO_NAV_SKIPPED_DUPLICATE] tabId=$tabId session=$currentSessId view=$currentViewId navId=$existingNavId gen=$existingGen url=$targetUrl thread=$threadName"
+      Log.i(TAG, skipMsg)
+      com.remmi.browser.util.DebugLogManager.log(skipMsg)
+      return
+    }
+
     val (navId, gen) = allocateNavigationGeneration(tabId, "loadUrl", targetUrl)
     val now = android.os.SystemClock.elapsedRealtime()
+    val newRealMsg = "[FORENSIC][NAV_NEW_REAL] tabId=$tabId navId=$navId gen=$gen url=$targetUrl trigger=loadUrl"
+    Log.i(TAG, newRealMsg)
+    com.remmi.browser.util.DebugLogManager.log(newRealMsg)
     val navReqMsg = "[FORENSIC] [NAV_REQUESTED] tabId=$tabId navId=$navId url=$targetUrl gen=$gen trigger=loadUrl elapsedRealtime=$now"
     Log.i(TAG, navReqMsg)
     com.remmi.browser.util.DebugLogManager.log(navReqMsg)
@@ -3166,11 +3389,11 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val sessId = session?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
     val threadName = Thread.currentThread().name
 
-    val activeRecovery = activeRecoveries.remove(tabId)
-    if (activeRecovery != null) {
-      activeRecovery.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-      transitionRecoveryState(tabId, RecoveryState.SUPERSEDED, activeRecovery.navId, activeRecovery.generation, "superseded_by_loadUrl")
-      val superMsg = "[FORENSIC][CONTENT_RECOVERY_SUPERSEDED] tabId=$tabId session=$sessId url=${activeRecovery.targetUrl} newUrl=$targetUrl gen=${activeRecovery.generation} newGen=$gen elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
+    val removedActiveRecovery = activeRecoveries.remove(tabId)
+    if (removedActiveRecovery != null) {
+      removedActiveRecovery.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+      transitionRecoveryState(tabId, RecoveryState.SUPERSEDED, removedActiveRecovery.navId, removedActiveRecovery.generation, "superseded_by_loadUrl")
+      val superMsg = "[FORENSIC][CONTENT_RECOVERY_SUPERSEDED] tabId=$tabId session=$sessId url=${removedActiveRecovery.targetUrl} newUrl=$targetUrl gen=${removedActiveRecovery.generation} newGen=$gen elapsedRealtime=${android.os.SystemClock.elapsedRealtime()}"
       Log.i(TAG, superMsg)
       com.remmi.browser.util.DebugLogManager.log(superMsg)
     }
@@ -3220,35 +3443,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val currentSessId = "0x" + Integer.toHexString(System.identityHashCode(currentSession))
     val currentViewId = attachedViews[tabId]?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
 
-    val isRecoveryActive = activeRecovery != null || pendingContentRecoveries.containsKey(tabId)
-    val isActualDuplicate = !forceReload && (lastDispatchedUrls[tabId] == targetUrl || areUrlsEquivalent(lastDispatchedUrls[tabId], targetUrl)) && !isRecoveryActive
-
-    if (isActualDuplicate) {
-      logNavDuplicateClassification(
-        tabId = tabId,
-        navId = navId,
-        generation = gen,
-        previousNavId = currentNavIds[tabId] ?: 0L,
-        previousGeneration = gen,
-        classification = "APP_LOAD_URL",
-        trigger = "loadUrl",
-        reason = "url_already_dispatched"
-      )
-      logNavAllocationRejected(
-        tabId = tabId,
-        navId = navId,
-        generation = gen,
-        url = targetUrl,
-        trigger = "loadUrl",
-        reason = "url_already_dispatched"
-      )
-      val skipMsg = "[FORENSIC] [GECKO_NAV_SKIPPED_DUPLICATE] tabId=$tabId session=$currentSessId view=$currentViewId navId=$navId gen=$gen url=$targetUrl thread=$threadName"
-      Log.i(TAG, skipMsg)
-      com.remmi.browser.util.DebugLogManager.log(skipMsg)
-      return
-    }
-
     lastDispatchedUrls[tabId] = targetUrl
+    inFlightUrls[tabId] = targetUrl
+    lastDispatchedTimes[tabId] = now
     pendingNavigations.remove(tabId)
     dispatchedNavigationsHistory.getOrPut(tabId) { mutableListOf() }.add(targetUrl)
     val dispatchMsg = "[FORENSIC] [GECKO_NAV_DISPATCH] tabId=$tabId session=$currentSessId view=$currentViewId navId=$navId gen=$gen url=$targetUrl thread=$threadName"
@@ -3320,8 +3517,14 @@ class GeckoEngineManager private constructor(private val context: Context) {
       Log.i(TAG, "[FORENSIC] NAV_NEW_TAB_TRANSITION tabId=$tabId")
       logDestructiveOp("RESET_TO_NEW_TAB", tabId, session, null, null, "resetToNewTab")
       checkPostNavFailure(tabId, "RESET_TO_NEW_TAB")
+      val navId = getActiveNavId(tabId)
+      val gen = navGenerations[tabId] ?: 0L
+      endVisualNavigation(tabId, navId, gen, "RESET_NEW_TAB")
+      presentationStates[tabId] = PresentationState.IDLE
       lastDispatchedUrls[tabId] = "about:blank"
+      lastObservedUrls[tabId] = "about:blank"
       inFlightNavigations.remove(tabId)
+      inFlightUrls.remove(tabId)
       val pendingRec = pendingContentRecoveries.remove(tabId)
       if (pendingRec != null) {
         transitionRecoveryState(tabId, RecoveryState.SUPERSEDED, pendingRec.navId, pendingRec.generation, "superseded_by_reset_to_new_tab")
@@ -3340,6 +3543,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
   fun stopLoading(tabId: String) {
     onMainSession(tabId, "STOP_LOADING") { session ->
+      val navId = getActiveNavId(tabId)
+      val gen = navGenerations[tabId] ?: 0L
+      endVisualNavigation(tabId, navId, gen, "STOPPED")
       logDestructiveOp("STOP_LOADING", tabId, session, null, null, "stopLoading")
       checkPostNavFailure(tabId, "STOP_LOADING")
       session.stop()
@@ -3453,6 +3659,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val activeRecovery = activeRecoveries.remove(tabId)
     activeRecovery?.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
     lastDispatchedUrls.remove(tabId)
+    inFlightNavigations.remove(tabId)
+    inFlightUrls.remove(tabId)
+    lastDispatchedTimes.remove(tabId)
     lastObservedUrls.remove(tabId)
     latestProgressUrls.remove(tabId)
     latestLocationUrls.remove(tabId)
@@ -3460,6 +3669,11 @@ class GeckoEngineManager private constructor(private val context: Context) {
     currentScrollPositions.remove(tabId)
     navGenerations.remove(tabId)
     lastRecoveredGenerations.remove(tabId)
+    presentationStates.remove(tabId)
+    presentationNavIds.remove(tabId)
+    presentationGenerations.remove(tabId)
+    presentationTargetUrls.remove(tabId)
+    tabPresentationFlows.remove(tabId)
     val session = activeSessions.remove(tabId)
     if (session == null) {
       Log.d(TAG, "[GECKO] operation=CLOSE_NOT_FOUND id=$tabId thread=main")
@@ -3510,12 +3724,20 @@ class GeckoEngineManager private constructor(private val context: Context) {
     activeRecoveries.values.forEach { it.timeoutRunnable?.let { r -> mainHandler.removeCallbacks(r) } }
     activeRecoveries.clear()
     lastDispatchedUrls.clear()
+    inFlightNavigations.clear()
+    inFlightUrls.clear()
+    lastDispatchedTimes.clear()
     lastObservedUrls.clear()
     latestProgressUrls.clear()
     latestLocationUrls.clear()
     dispatchedNavigationsHistory.clear()
     navGenerations.clear()
     lastRecoveredGenerations.clear()
+    presentationStates.clear()
+    presentationNavIds.clear()
+    presentationGenerations.clear()
+    presentationTargetUrls.clear()
+    tabPresentationFlows.clear()
     val sessionsToClose = activeSessions.values.toList()
     activeSessions.clear()
     sessionOwners.clear()
@@ -3554,6 +3776,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
       activeRecoveries.values.forEach { it.timeoutRunnable?.let { r -> mainHandler.removeCallbacks(r) } }
       activeRecoveries.clear()
       lastDispatchedUrls.clear()
+      inFlightNavigations.clear()
+      inFlightUrls.clear()
+      lastDispatchedTimes.clear()
       lastObservedUrls.clear()
       latestProgressUrls.clear()
       latestLocationUrls.clear()
