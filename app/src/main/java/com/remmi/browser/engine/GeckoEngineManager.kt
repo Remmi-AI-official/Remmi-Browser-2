@@ -1662,65 +1662,60 @@ class GeckoEngineManager private constructor(private val context: Context) {
             }
         }
 
-        // Intercept Ad Redirects (HTTP 3xx redirects or script-initiated navigations without user gesture)
+        // Intercept all navigations through Adblock (User gesture, redirects, popups)
         val sourceUrl = lastObservedUrls[tabId] ?: lastDispatchedUrls[tabId] ?: tab?.url ?: ""
         val sourceHost = try { if (sourceUrl.isNotBlank()) java.net.URI(sourceUrl).host?.lowercase() else null } catch (_: Exception) { null }
         val targetHost = try { if (url.isNotBlank()) java.net.URI(url).host?.lowercase() else null } catch (_: Exception) { null }
         val isCrossHost = sourceHost != null && targetHost != null && sourceHost != targetHost
 
-        if (request.isRedirect || (!request.hasUserGesture && url.isNotBlank())) {
-          if (isCrossHost || request.isRedirect) {
-            val result = GeckoResult<AllowOrDeny>()
-            val triggerUri = request.triggerUri ?: sourceUrl
-            val isRedirect = request.isRedirect
-            val hasUserGesture = request.hasUserGesture
+        val result = GeckoResult<AllowOrDeny>()
+        val triggerUri = request.triggerUri ?: sourceUrl
+        val isRedirect = request.isRedirect
+        val hasUserGesture = request.hasUserGesture
 
-            engineScope.launch(Dispatchers.Default) {
-              val bridge = AdblockBridge.getInstance()
-              val popupDec = bridge.evaluateDecision(
-                url = url,
-                sourceUrl = sourceUrl,
-                initiator = triggerUri,
-                method = "GET",
-                resourceType = "popup",
-                aggressive = isGhost,
-                thirdParty = isCrossHost
-              )
-              val docDec = if (!popupDec.blocked) {
-                bridge.evaluateDecision(
-                  url = url,
-                  sourceUrl = sourceUrl,
-                  initiator = triggerUri,
-                  method = "GET",
-                  resourceType = "main_frame",
-                  aggressive = isGhost,
-                  thirdParty = isCrossHost
-                )
-              } else popupDec
+        engineScope.launch(Dispatchers.Default) {
+          val bridge = AdblockBridge.getInstance()
+          val popupDec = bridge.evaluateDecision(
+            url = url,
+            sourceUrl = sourceUrl,
+            initiator = triggerUri,
+            method = "GET",
+            resourceType = "popup",
+            aggressive = isGhost,
+            thirdParty = isCrossHost
+          )
+          val docDec = if (!popupDec.blocked) {
+            bridge.evaluateDecision(
+              url = url,
+              sourceUrl = sourceUrl,
+              initiator = triggerUri,
+              method = "GET",
+              resourceType = "main_frame",
+              aggressive = isGhost,
+              thirdParty = isCrossHost
+            )
+          } else popupDec
 
-              val isAdRedirect = com.remmi.browser.security.NavigationSecurityAuthority.isAdOrSpamDestination(url)
+          val isAdRedirect = com.remmi.browser.security.NavigationSecurityAuthority.isAdOrSpamDestination(url)
 
-              if (popupDec.blocked || docDec.blocked || isAdRedirect) {
-                val blockMsg = "[FORENSIC] [NAV_REDIRECT_BLOCKED] tabId=$tabId url=$url sourceUrl=$sourceUrl isRedirect=$isRedirect hasUserGesture=$hasUserGesture ruleId=${popupDec.ruleId ?: docDec.ruleId}"
-                Log.w(TAG, blockMsg)
-                com.remmi.browser.util.DebugLogManager.log(blockMsg)
-                NavigationChainTracker.markSecurityBlocked(tabId, url, "adblock_redirect_denied")
-                withContext(Dispatchers.Main) {
-                  result.complete(AllowOrDeny.DENY)
-                }
-              } else {
-                withContext(Dispatchers.Main) {
-                  processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
-                  result.complete(AllowOrDeny.ALLOW)
-                }
-              }
+          if (popupDec.blocked || docDec.blocked || isAdRedirect) {
+            val blockedRuleId = popupDec.ruleId ?: docDec.ruleId ?: "spam_redirect"
+            val blockMsg = "[FORENSIC] [NAV_REDIRECT_BLOCKED] tabId=$tabId url=$url sourceUrl=$sourceUrl isRedirect=$isRedirect hasUserGesture=$hasUserGesture ruleId=$blockedRuleId"
+            Log.w(TAG, blockMsg)
+            com.remmi.browser.util.DebugLogManager.log(blockMsg)
+            Log.i(TAG, "[ADBLOCK_BLOCK]\n$url\nmatched_rule\n$blockedRuleId")
+            NavigationChainTracker.markSecurityBlocked(tabId, url, "adblock_redirect_denied")
+            withContext(Dispatchers.Main) {
+              result.complete(AllowOrDeny.DENY)
             }
-            return result
+          } else {
+            withContext(Dispatchers.Main) {
+              processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
+              result.complete(AllowOrDeny.ALLOW)
+            }
           }
         }
-
-        processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
-        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+        return result
       }
 
       private fun processAllowedLoadRequest(
@@ -3331,6 +3326,13 @@ class GeckoEngineManager private constructor(private val context: Context) {
       return
     }
     assertMainThread("LOAD_URL id=$tabId")
+    
+    val bridge = com.remmi.adblock.AdblockBridge.getInstance()
+    val rulesCount = bridge.getLoadedRulesCount()
+    val adblockGen = bridge.getEngineGeneration()
+    Log.i(TAG, "[ADBLOCK_ENGINE_READY] $tabId ${tab?.profile?.name ?: "STANDARD"} $rulesCount $rulesCount $adblockGen")
+    Log.i(TAG, "[ADBLOCK_MATCHER_ATTACHED] $tabId $adblockGen")
+
     android.util.Log.i(TAG, "STATE_LOG: FIRST_PAGE_START (time=${android.os.SystemClock.elapsedRealtime()})")
 
     val activeRecovery = activeRecoveries[tabId]

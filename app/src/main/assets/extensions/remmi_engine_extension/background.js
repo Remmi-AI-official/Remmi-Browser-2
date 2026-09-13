@@ -34,8 +34,15 @@ function recordDiagnostic(msg, extra = null) {
 }
 
 function logToNative(msg) {
-  // STRICT PURIFICATION: In-memory logging only. NEVER call port.postMessage({type: "LOG"})!
   recordDiagnostic(msg);
+  if (portState === "HEALTHY" || portState === "CONNECTED") {
+    try {
+      port.postMessage({
+        type: "WEBEXT_LOG",
+        message: msg
+      });
+    } catch (_e) {}
+  }
 }
 
 function isTraceCandidateUrl(url) {

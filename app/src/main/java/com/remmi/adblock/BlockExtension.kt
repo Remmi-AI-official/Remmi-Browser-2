@@ -530,6 +530,10 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
           val tabId = message.optString("tabId")
 
           when (type) {
+            "WEBEXT_LOG" -> {
+              Log.i(TAG, "[WEBEXT_LOG] $msgText")
+              com.remmi.browser.util.DebugLogManager.log("[WEBEXT_LOG] $msgText")
+            }
             "PING" -> {
               val pingReceiveTs = System.currentTimeMillis()
               Log.d(TAG, "[PING_RECEIVE] nativeInstanceId=$instId jsInstanceId=$jsInstanceId reqPortGen=$reqPortGen requestId=$requestId ts=$pingReceiveTs")
@@ -589,6 +593,9 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                   val wStartMsg = "[FORENSIC][WEBEXT_WORKER_START] requestId=$requestId thread=$workerThread queueSize=${networkQueue.size} elapsedRealtime=$wStartRealtime"
                   Log.d(TAG, wStartMsg)
 
+                  val gen = adblockBridge.getEngineGeneration()
+                  Log.i(TAG, "[ADBLOCK_REQUEST_SEEN]\n$url\n$tabId\n$resourceType\n$sourceUrl\n$gen")
+
                   try {
                   val sourceHost = try {
                     if (sourceUrl.isNotEmpty()) java.net.URI(sourceUrl).host?.lowercase()?.trim() else null
@@ -625,6 +632,14 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                     }
                     dec
                   }
+                  
+                  if (decision.blocked) {
+                    Log.i(TAG, "[ADBLOCK_MATCH]\n${decision.ruleId}\n$url\n$tabId")
+                    Log.i(TAG, "[ADBLOCK_BLOCK]\n$url\nmatched_rule\n${decision.ruleId}")
+                  } else {
+                    Log.i(TAG, "[ADBLOCK_ALLOW]\n$url\nno_match_or_bypassed")
+                  }
+
                   val endTs = System.currentTimeMillis()
                   val wDoneRealtime = android.os.SystemClock.elapsedRealtime()
                   val wElapsed = wDoneRealtime - wStartRealtime
