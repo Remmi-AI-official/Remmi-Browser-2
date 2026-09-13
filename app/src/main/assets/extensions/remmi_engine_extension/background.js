@@ -346,6 +346,25 @@ function connectNative() {
             });
           }
         }
+      } else if (msg.type === "AUTOFILL_FILL_CREDENTIALS") {
+        const rawTabId = msg.tabId;
+        const numTabId = (typeof rawTabId === "number") ? rawTabId : (parseInt(rawTabId, 10) || null);
+        const fillMsg = {
+          type: "AUTOFILL_FILL",
+          username: msg.username || "",
+          password: msg.password || ""
+        };
+        if (numTabId !== null && !isNaN(numTabId)) {
+          browser.tabs.sendMessage(numTabId, fillMsg).catch(_ => {
+            browser.tabs.query({ active: true }).then(tabs => {
+              if (tabs && tabs[0]) browser.tabs.sendMessage(tabs[0].id, fillMsg).catch(_ => {});
+            });
+          });
+        } else {
+          browser.tabs.query({ active: true }).then(tabs => {
+            if (tabs && tabs[0]) browser.tabs.sendMessage(tabs[0].id, fillMsg).catch(_ => {});
+          });
+        }
       } else if (msg.type === "RUN_BENCHMARK") {
         runPingBenchmark(msg.count || 100);
       } else if (msg.type === "GET_DIAGNOSTICS") {
@@ -555,6 +574,43 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     };
 
     if (port && portState === "HEALTHY") {
+      try {
+        port.postMessage(payload);
+      } catch (_e) {}
+    }
+    if (sendResponse) sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "AUTH_FORM_SUBMITTED") {
+    const payload = {
+      type: "AUTH_FORM_SUBMITTED",
+      tabId: sender && sender.tab ? sender.tab.id : null,
+      origin: message.origin || (sender && sender.tab ? sender.tab.url : ""),
+      url: message.url || (sender && sender.tab ? sender.tab.url : ""),
+      username: message.username || "",
+      password: message.password || "",
+      timestamp: Date.now()
+    };
+    if (port) {
+      try {
+        port.postMessage(payload);
+      } catch (_e) {}
+    }
+    if (sendResponse) sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "AUTH_FIELD_FOCUSED") {
+    const payload = {
+      type: "AUTH_FIELD_FOCUSED",
+      tabId: sender && sender.tab ? sender.tab.id : null,
+      origin: message.origin || (sender && sender.tab ? sender.tab.url : ""),
+      url: message.url || (sender && sender.tab ? sender.tab.url : ""),
+      isPassword: !!message.isPassword,
+      timestamp: Date.now()
+    };
+    if (port) {
       try {
         port.postMessage(payload);
       } catch (_e) {}

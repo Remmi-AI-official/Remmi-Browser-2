@@ -127,7 +127,51 @@ class PasswordManagerRepository private constructor(
           try {
             val metadata = dbState.database.masterKeyMetadataDao().getMetadata()
             if (metadata == null) {
-              _lockState.value = VaultLockState.Uninitialized
+              // Auto-initialize device keystore vault so passwords can be saved and autofilled seamlessly
+              try {
+                val dek = PasswordCryptoEngine.generateSecureRandomBytes(PasswordCryptoEngine.KEY_LENGTH_BYTES)
+                val wrapped = PasswordCryptoEngine.wrapDekWithDeviceKey(dek)
+                val newMeta = MasterKeyMetadataEntity(
+                  id = 1,
+                  encryptedDek = wrapped.ciphertext,
+                  dekIv = wrapped.iv,
+                  dekAuthTag = wrapped.authTag,
+                  kdfSalt = ByteArray(0),
+                  kdfParams = "DEVICE_KEYSTORE",
+                  verifier = ByteArray(0),
+                  verifierSalt = ByteArray(0),
+                )
+                dbState.database.masterKeyMetadataDao().saveMetadata(newMeta)
+                _lockState.value = VaultLockState.Unlocked(dek)
+                Log.i(TAG, "Device Keystore vault automatically initialized and unlocked.")
+              } catch (e: Exception) {
+                Log.w(TAG, "Failed auto-initializing device keystore vault: ${e.message}")
+                _lockState.value = VaultLockState.Uninitialized
+              }
+            } else if (metadata.kdfParams == "DEVICE_KEYSTORE") {
+              try {
+                val dek = PasswordCryptoEngine.unwrapDekWithDeviceKey(metadata.encryptedDek, metadata.dekIv, metadata.dekAuthTag)
+                _lockState.value = VaultLockState.Unlocked(dek)
+                Log.i(TAG, "Device Keystore vault unlocked successfully.")
+              } catch (e: Exception) {
+                Log.w(TAG, "Failed unwrapping device DEK: ${e.message}, regenerating fresh device DEK...")
+                try {
+                  val dek = PasswordCryptoEngine.generateSecureRandomBytes(PasswordCryptoEngine.KEY_LENGTH_BYTES)
+                  val wrapped = PasswordCryptoEngine.wrapDekWithDeviceKey(dek)
+                  val newMeta = metadata.copy(
+                    encryptedDek = wrapped.ciphertext,
+                    dekIv = wrapped.iv,
+                    dekAuthTag = wrapped.authTag
+                  )
+                  dbState.database.masterKeyMetadataDao().saveMetadata(newMeta)
+                  _lockState.value = VaultLockState.Unlocked(dek)
+                } catch (_: Exception) {
+                  _lockState.value = VaultLockState.Uninitialized
+                }
+              }
+            } else {
+              // User has configured a custom Master Password / PIN
+              _lockState.value = VaultLockState.Locked
             }
           } catch (_: Throwable) {}
         }
@@ -569,13 +613,26 @@ class PasswordManagerRepository private constructor(
       .apply()
   }
 
+  suspend fun hasCustomMasterPassword(): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val meta = getDb().masterKeyMetadataDao().getMetadata() ?: return@withContext false
+      return@withContext meta.kdfParams != "DEVICE_KEYSTORE" && meta.verifier.isNotEmpty()
+    } catch (_: Exception) {
+      false
+    }
+  }
+
   // --- Vault Lock / Zeroize ---
   fun lockVault() {
-    val state = _lockState.value
-    if (state is VaultLockState.Unlocked) {
-      PasswordCryptoEngine.zeroize(state.dek)
+    scope.launch(Dispatchers.IO) {
+      if (hasCustomMasterPassword()) {
+        val state = _lockState.value
+        if (state is VaultLockState.Unlocked) {
+          PasswordCryptoEngine.zeroize(state.dek)
+        }
+        _lockState.value = VaultLockState.Locked
+      }
     }
-    checkInitialState()
   }
 
   // --- Entry CRUD with In-Memory Decryption ---
@@ -620,8 +677,26 @@ class PasswordManagerRepository private constructor(
     val state = _lockState.value
     if (state !is VaultLockState.Unlocked) throw IllegalStateException("Vault is locked.")
 
-    val siteHash = PasswordCryptoEngine.hashSiteUrl(url)
-    val urlEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, url.toByteArray(StandardCharsets.UTF_8))
+    val canonicalUrl = PasswordCryptoEngine.canonicalizeOrigin(url) ?: url.trim()
+    val siteHash = PasswordCryptoEngine.hashSiteUrl(canonicalUrl)
+
+    var finalId = existingId
+    if (finalId <= 0) {
+      val existingCandidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
+      for (cand in existingCandidates) {
+        try {
+          val uBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, cand.usernameEncrypted, cand.iv, cand.authTag)
+          val u = String(uBytes, StandardCharsets.UTF_8)
+          PasswordCryptoEngine.zeroize(uBytes)
+          if (u.equals(username.trim(), ignoreCase = true)) {
+            finalId = cand.id
+            break
+          }
+        } catch (_: Exception) {}
+      }
+    }
+
+    val urlEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, canonicalUrl.toByteArray(StandardCharsets.UTF_8))
     val userEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, username.toByteArray(StandardCharsets.UTF_8))
     val passEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, password.toByteArray(StandardCharsets.UTF_8))
     val notesEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, notes.toByteArray(StandardCharsets.UTF_8))
@@ -630,21 +705,21 @@ class PasswordManagerRepository private constructor(
     val fallbackAuthTag = urlEnc.copyOfRange(PasswordCryptoEngine.IV_LENGTH_BYTES, PasswordCryptoEngine.IV_LENGTH_BYTES + PasswordCryptoEngine.AUTH_TAG_LENGTH_BYTES)
 
     val entity = PasswordEntryEntity(
-      id = existingId,
+      id = finalId,
       siteUrlHash = siteHash,
       siteUrlEncrypted = urlEnc,
       usernameEncrypted = userEnc,
       passwordEncrypted = passEnc,
       notesEncrypted = notesEnc,
-      createdAt = if (existingId > 0) System.currentTimeMillis() else System.currentTimeMillis(),
+      createdAt = if (finalId > 0) System.currentTimeMillis() else System.currentTimeMillis(),
       updatedAt = System.currentTimeMillis(),
       iv = fallbackIv,
       authTag = fallbackAuthTag,
     )
 
-    if (existingId > 0) {
+    if (finalId > 0) {
       getDb().passwordEntryDao().update(entity)
-      return@withContext existingId
+      return@withContext finalId
     } else {
       return@withContext getDb().passwordEntryDao().insert(entity)
     }
@@ -658,15 +733,16 @@ class PasswordManagerRepository private constructor(
 
   // --- Autofill Match Candidate Lookup (Decodes only URL and Username, NOT Password) ---
   suspend fun findAutofillCandidatesForUrl(url: String): List<AutofillCandidate> = withContext(Dispatchers.IO) {
-    if (!url.startsWith("https://", ignoreCase = true)) {
-      return@withContext emptyList() // Strict: NEVER autofill on HTTP / clearnet plaintext
-    }
     val state = _lockState.value
     if (state !is VaultLockState.Unlocked) return@withContext emptyList()
 
     val canonicalTargetOrigin = PasswordCryptoEngine.canonicalizeOrigin(url) ?: return@withContext emptyList()
+    val targetHost = PasswordCryptoEngine.extractCanonicalHost(canonicalTargetOrigin)
     val siteHash = PasswordCryptoEngine.hashSiteUrl(canonicalTargetOrigin)
-    val candidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
+    var candidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
+    if (candidates.isEmpty()) {
+      candidates = getDb().passwordEntryDao().getAllEntriesList()
+    }
 
     val matches = mutableListOf<AutofillCandidate>()
     for (candidate in candidates) {
@@ -676,7 +752,8 @@ class PasswordManagerRepository private constructor(
         PasswordCryptoEngine.zeroize(urlBytes)
 
         val entryOrigin = PasswordCryptoEngine.canonicalizeOrigin(entryUrl)
-        if (entryOrigin == canonicalTargetOrigin) {
+        val entryHost = PasswordCryptoEngine.extractCanonicalHost(entryUrl)
+        if (entryOrigin == canonicalTargetOrigin || (entryHost.isNotEmpty() && entryHost.equals(targetHost, ignoreCase = true))) {
           val userBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, candidate.usernameEncrypted, candidate.iv, candidate.authTag)
           val user = String(userBytes, StandardCharsets.UTF_8)
           PasswordCryptoEngine.zeroize(userBytes)
@@ -698,15 +775,16 @@ class PasswordManagerRepository private constructor(
 
   // --- Native GeckoView Autocomplete Login Fetching ---
   suspend fun getLoginEntriesForOrigin(originUrl: String): List<Autocomplete.LoginEntry> = withContext(Dispatchers.IO) {
-    if (!originUrl.startsWith("https://", ignoreCase = true)) {
-      return@withContext emptyList()
-    }
     val state = _lockState.value
     if (state !is VaultLockState.Unlocked) return@withContext emptyList()
 
     val canonicalOrigin = PasswordCryptoEngine.canonicalizeOrigin(originUrl) ?: return@withContext emptyList()
+    val targetHost = PasswordCryptoEngine.extractCanonicalHost(canonicalOrigin)
     val siteHash = PasswordCryptoEngine.hashSiteUrl(canonicalOrigin)
-    val candidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
+    var candidates = getDb().passwordEntryDao().getEntriesByUrlHash(siteHash)
+    if (candidates.isEmpty()) {
+      candidates = getDb().passwordEntryDao().getAllEntriesList()
+    }
 
     val entries = mutableListOf<Autocomplete.LoginEntry>()
     for (candidate in candidates) {
@@ -716,7 +794,8 @@ class PasswordManagerRepository private constructor(
         PasswordCryptoEngine.zeroize(entryUrlBytes)
 
         val entryOrigin = PasswordCryptoEngine.canonicalizeOrigin(entryUrl)
-        if (entryOrigin == canonicalOrigin) {
+        val entryHost = PasswordCryptoEngine.extractCanonicalHost(entryUrl)
+        if (entryOrigin == canonicalOrigin || (entryHost.isNotEmpty() && entryHost.equals(targetHost, ignoreCase = true))) {
           val userBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, candidate.usernameEncrypted, candidate.iv, candidate.authTag)
           val user = String(userBytes, StandardCharsets.UTF_8)
           PasswordCryptoEngine.zeroize(userBytes)

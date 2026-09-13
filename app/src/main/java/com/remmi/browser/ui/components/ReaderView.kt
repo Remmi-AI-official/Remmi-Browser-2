@@ -274,32 +274,33 @@ fun ReaderView(
           Row(
             modifier = Modifier
               .fillMaxWidth()
-              .heightIn(min = 48.dp)
-              .padding(horizontal = 8.dp, vertical = 6.dp),
+              .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            // Left: Back button & Title Badge
-            IconButton(
+            // Left: Back button (Clean compact alignment)
+            Surface(
               onClick = {
                 speechManager.stop()
                 onClose()
               },
+              shape = RoundedCornerShape(8.dp),
+              color = readerTheme.accentColor.copy(alpha = 0.12f),
+              border = androidx.compose.foundation.BorderStroke(0.8.dp, readerTheme.accentColor.copy(alpha = 0.3f)),
               modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(readerTheme.background)
-                .border(0.6.dp, readerTheme.accentColor.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                .size(32.dp)
                 .testTag("reader_exit_button")
             ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Exit Reader Mode",
-                tint = readerTheme.accentColor,
-                modifier = Modifier.size(18.dp),
-              )
+              Box(contentAlignment = Alignment.Center) {
+                Icon(
+                  imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                  contentDescription = "Exit Reader Mode",
+                  tint = readerTheme.accentColor,
+                  modifier = Modifier.size(16.dp),
+                )
+              }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column(
               modifier = Modifier.weight(1f)
@@ -362,7 +363,7 @@ fun ReaderView(
                   if (isArticleSaved) Color(0xFFF59E0B) else readerTheme.accentColor.copy(alpha = 0.3f)
                 ),
                 modifier = Modifier
-                  .size(36.dp)
+                  .size(32.dp)
                   .testTag("reader_save_reading_list_btn")
               ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -370,7 +371,7 @@ fun ReaderView(
                     imageVector = if (isArticleSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                     contentDescription = "Save to Reading List",
                     tint = if (isArticleSaved) Color(0xFFF59E0B) else readerTheme.accentColor,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(16.dp)
                   )
                 }
               }
@@ -385,7 +386,7 @@ fun ReaderView(
                 color = readerTheme.background,
                 border = androidx.compose.foundation.BorderStroke(0.8.dp, readerTheme.accentColor.copy(alpha = 0.3f)),
                 modifier = Modifier
-                  .size(36.dp)
+                  .size(32.dp)
                   .testTag("reader_share_btn")
               ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -393,7 +394,7 @@ fun ReaderView(
                     imageVector = Icons.Default.Share,
                     contentDescription = "Share Article",
                     tint = readerTheme.accentColor,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(16.dp)
                   )
                 }
               }
@@ -1717,7 +1718,7 @@ fun ReaderView(
 
             Row(
               modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
               val domain = try {
@@ -1728,7 +1729,10 @@ fun ReaderView(
                 text = "🌐 $domain",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = readerTheme.accentColor
+                color = readerTheme.accentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
               )
 
               Text(
@@ -1738,9 +1742,11 @@ fun ReaderView(
               )
 
               Text(
-                text = "⏱ ~${displayArticle?.readingTimeMinutes ?: 1} min read (${displayArticle?.wordCount ?: 0} words)",
+                text = "⏱ ~${displayArticle?.readingTimeMinutes ?: 1} min read",
                 fontSize = 11.sp,
-                color = readerTheme.textColor.copy(alpha = 0.7f)
+                color = readerTheme.textColor.copy(alpha = 0.7f),
+                maxLines = 1,
+                softWrap = false
               )
             }
           }

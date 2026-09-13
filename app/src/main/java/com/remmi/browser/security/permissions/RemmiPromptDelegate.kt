@@ -115,11 +115,13 @@ class RemmiPromptDelegate(
     val loginEntry = firstOption.value
     val origin = loginEntry?.origin ?: prompt.title ?: ""
     val username = loginEntry?.username ?: ""
+    val password = loginEntry?.password ?: ""
 
     coordinator.requestLoginSave(
       tabId = tabId,
       origin = origin,
       username = username,
+      password = password,
       onSave = {
         result.complete(prompt.confirm(firstOption))
       },

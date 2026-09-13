@@ -397,6 +397,7 @@ fun BrowserView(
             ViewGroup.LayoutParams.MATCH_PARENT
           )
           setBackgroundColor(surfaceColor)
+          isEnabled = false
           setColorSchemeColors(
             android.graphics.Color.parseColor("#00E5FF"),
             android.graphics.Color.parseColor("#7C4DFF"),
@@ -510,6 +511,7 @@ fun BrowserView(
         swipeLayout.setOnRefreshListener {
           geckoEngine.reload(tab.id)
         }
+        swipeLayout.isEnabled = false
         if (!tab.isLoading && swipeLayout.isRefreshing) {
           swipeLayout.isRefreshing = false
         }

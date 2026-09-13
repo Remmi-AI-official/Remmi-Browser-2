@@ -348,7 +348,7 @@ object PasswordCryptoEngine {
     } ?: return null
 
     val scheme = uri.scheme?.lowercase(java.util.Locale.US) ?: return null
-    if (scheme != "https") {
+    if (scheme != "https" && scheme != "http") {
       return null
     }
 
@@ -368,12 +368,12 @@ object PasswordCryptoEngine {
     }
 
     val port = uri.port
-    val isDefaultPort = (port == -1 || port == 443)
+    val isDefaultPort = (port == -1 || (scheme == "https" && port == 443) || (scheme == "http" && port == 80))
 
     return if (port != -1 && !isDefaultPort) {
-      "https://$normalizedHost:$port"
+      "$scheme://$normalizedHost:$port"
     } else {
-      "https://$normalizedHost"
+      "$scheme://$normalizedHost"
     }
   }
 
@@ -400,7 +400,55 @@ object PasswordCryptoEngine {
     }
   }
 
-  // --- 6. Hardware Keystore Biometric Key Operations ---
+  // --- 6. Hardware Keystore Device Vault Key (Zero-Prompt Engine Encryption) ---
+  const val DEVICE_VAULT_KEY_ALIAS = "remmi_device_vault_key"
+
+  fun getOrCreateDeviceVaultKey(): SecretKey {
+    val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+    if (keyStore.containsAlias(DEVICE_VAULT_KEY_ALIAS)) {
+      try {
+        val existing = keyStore.getKey(DEVICE_VAULT_KEY_ALIAS, null) as? SecretKey
+        if (existing != null) return existing
+      } catch (e: Exception) {
+        keyStore.deleteEntry(DEVICE_VAULT_KEY_ALIAS)
+      }
+    }
+
+    val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+    val purposes = KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+    val builder = KeyGenParameterSpec.Builder(DEVICE_VAULT_KEY_ALIAS, purposes)
+      .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+      .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+      .setKeySize(256)
+
+    keyGenerator.init(builder.build())
+    return keyGenerator.generateKey()
+  }
+
+  fun wrapDekWithDeviceKey(dek: ByteArray): AesGcmCiphertext {
+    val key = getOrCreateDeviceVaultKey()
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, key)
+    val fullCiphertext = cipher.doFinal(dek)
+    val iv = cipher.iv
+    val tagOffset = fullCiphertext.size - AUTH_TAG_LENGTH_BYTES
+    val rawCiphertext = fullCiphertext.copyOfRange(0, tagOffset)
+    val authTag = fullCiphertext.copyOfRange(tagOffset, fullCiphertext.size)
+    return AesGcmCiphertext(rawCiphertext, iv, authTag)
+  }
+
+  fun unwrapDekWithDeviceKey(ciphertext: ByteArray, iv: ByteArray, authTag: ByteArray): ByteArray {
+    val key = getOrCreateDeviceVaultKey()
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    val gcmSpec = GCMParameterSpec(AUTH_TAG_LENGTH_BYTES * 8, iv)
+    cipher.init(Cipher.DECRYPT_MODE, key, gcmSpec)
+    val combined = ByteArray(ciphertext.size + authTag.size)
+    System.arraycopy(ciphertext, 0, combined, 0, ciphertext.size)
+    System.arraycopy(authTag, 0, combined, ciphertext.size, authTag.size)
+    return cipher.doFinal(combined)
+  }
+
+  // --- 7. Hardware Keystore Biometric Key Operations ---
   fun getOrCreateBiometricKeystoreKey(forceRecreate: Boolean = false): SecretKey {
     val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
     if (!forceRecreate && keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {

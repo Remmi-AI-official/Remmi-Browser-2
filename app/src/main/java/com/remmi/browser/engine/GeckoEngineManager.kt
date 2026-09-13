@@ -1355,6 +1355,17 @@ class GeckoEngineManager private constructor(private val context: Context) {
           passwordRepo = com.remmi.browser.security.PasswordManagerRepository.getInstance(context)
         )
       )
+      val autofillPrefs = mapOf(
+        "signon.rememberSignons" to true,
+        "signon.autofillForms" to true,
+        "signon.formlessCapture.enabled" to true,
+        "signon.storeWhenAutocompleteOff" to true,
+        "signon.overrideAutocompleteOff" to true,
+        "signon.showAutoCompleteFooter" to true,
+        "signon.schemeUpgrades" to true,
+      )
+      GeckoPreferenceController(rt).applyPreferences(autofillPrefs, GeckoPreferenceController.PREF_BRANCH_USER)
+      Log.i(TAG, "AutocompleteStorageDelegate and signon preferences registered successfully.")
     } catch (t: Throwable) {
       Log.w(TAG, "Failed registering AutocompleteStorageDelegate: ${t.message}")
     }

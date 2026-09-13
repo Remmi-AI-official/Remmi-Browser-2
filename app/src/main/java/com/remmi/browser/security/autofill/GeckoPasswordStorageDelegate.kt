@@ -27,12 +27,6 @@ class GeckoPasswordStorageDelegate(
       return GeckoResult.fromValue(emptyArray())
     }
 
-    // Fort Knox Priority check
-    if (passwordRepo.isFortKnoxInstalled()) {
-      Log.i(TAG, "Fort Knox priority active. Suppressing built-in credential fetch.")
-      return GeckoResult.fromValue(emptyArray())
-    }
-
     // Vault Lock Check
     if (!passwordRepo.isUnlocked()) {
       Log.d(TAG, "Vault locked. Suppressing credential fetch.")
@@ -40,8 +34,8 @@ class GeckoPasswordStorageDelegate(
     }
 
     val canonical = PasswordCryptoEngine.canonicalizeOrigin(domain)
-    if (canonical == null || !canonical.startsWith("https://", ignoreCase = true)) {
-      Log.w(TAG, "Refusing login fetch for non-HTTPS or invalid domain ($domain)")
+    if (canonical == null) {
+      Log.w(TAG, "Refusing login fetch for invalid domain ($domain)")
       return GeckoResult.fromValue(emptyArray())
     }
 
@@ -65,7 +59,7 @@ class GeckoPasswordStorageDelegate(
   }
 
   suspend fun saveLoginDirect(login: Autocomplete.LoginEntry) {
-    if (passwordRepo.isFortKnoxInstalled() || !passwordRepo.isUnlocked()) return
+    if (!passwordRepo.isUnlocked()) return
     val origin = login.origin ?: return
     val canonicalOrigin = PasswordCryptoEngine.canonicalizeOrigin(origin) ?: return
     val username = login.username ?: ""
@@ -79,11 +73,6 @@ class GeckoPasswordStorageDelegate(
   }
 
   override fun onLoginSave(login: Autocomplete.LoginEntry) {
-    if (passwordRepo.isFortKnoxInstalled()) {
-      Log.i(TAG, "Fort Knox priority active. Suppressing built-in credential save.")
-      return
-    }
-
     if (!passwordRepo.isUnlocked()) {
       Log.w(TAG, "Cannot save login while vault is locked.")
       return
@@ -91,8 +80,8 @@ class GeckoPasswordStorageDelegate(
 
     val origin = login.origin ?: return
     val canonicalOrigin = PasswordCryptoEngine.canonicalizeOrigin(origin)
-    if (canonicalOrigin == null || !canonicalOrigin.startsWith("https://", ignoreCase = true)) {
-      Log.w(TAG, "Refusing to save credentials for non-HTTPS origin")
+    if (canonicalOrigin == null) {
+      Log.w(TAG, "Refusing to save credentials for invalid origin")
       return
     }
 
@@ -110,7 +99,7 @@ class GeckoPasswordStorageDelegate(
           username = username,
           password = password,
         )
-        Log.i(TAG, "Credential securely stored for exact origin")
+        Log.i(TAG, "Credential securely stored for exact origin: $canonicalOrigin")
       } catch (e: Exception) {
         Log.w(TAG, "Failed saving credential: ${e.message}")
       }

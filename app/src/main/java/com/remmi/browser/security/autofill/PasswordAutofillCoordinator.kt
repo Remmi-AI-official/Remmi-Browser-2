@@ -3,6 +3,7 @@ package com.remmi.browser.security.autofill
 import android.content.Context
 import android.util.Log
 import com.remmi.browser.security.PasswordManagerRepository
+import com.remmi.browser.security.crypto.PasswordCryptoEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ data class SavePasswordPromptRequest(
   val tabId: String = "",
   val origin: String,
   val username: String,
+  val password: String = "",
   val onSave: () -> Unit,
   val onDismiss: () -> Unit,
 )
@@ -30,8 +32,6 @@ data class SelectPasswordPromptRequest(
 /**
  * REMmi Cyber Autofill & GeckoView Credential Delegate Coordinator.
  * Coordinates native GeckoView login selection and save prompts with Compose UI.
- * Enforces strict HTTPS verification, zero clearnet leaks, Fort Knox priority triage,
- * and zero exposure of passwords in UI state models.
  */
 class PasswordAutofillCoordinator(
   private val context: Context,
@@ -54,6 +54,70 @@ class PasswordAutofillCoordinator(
 
   init {
     checkFortKnox()
+    setupBlockExtensionBridge()
+  }
+
+  private fun setupBlockExtensionBridge() {
+    val blockExtension = com.remmi.adblock.BlockExtension.getInstance()
+    blockExtension.addAuthFormListener { tabId, origin, user, pass ->
+      if (pass.isNotBlank()) {
+        scope.launch(Dispatchers.Main) {
+          requestLoginSave(
+            tabId = tabId,
+            origin = origin,
+            username = user,
+            password = pass,
+            onSave = {
+              scope.launch(Dispatchers.IO) {
+                try {
+                  val canonical = PasswordCryptoEngine.canonicalizeOrigin(origin) ?: origin
+                  if (canonical.isNotBlank()) {
+                    passwordRepo.saveOrUpdateEntry(
+                      url = canonical,
+                      username = user,
+                      password = pass
+                    )
+                    Log.i(TAG, "Saved password for $canonical to Password Vault via WebExtension bridge.")
+                  }
+                } catch (e: Exception) {
+                  Log.e(TAG, "Failed saving password via WebExtension bridge: ${e.message}", e)
+                }
+              }
+            },
+            onDismiss = {}
+          )
+        }
+      }
+    }
+
+    blockExtension.addAuthFocusListener { tabId, origin, isPassword ->
+      scope.launch(Dispatchers.IO) {
+        if (passwordRepo.isUnlocked()) {
+          val logins = passwordRepo.getLoginEntriesForOrigin(origin)
+          if (logins.isNotEmpty()) {
+            val options = logins.map { entry ->
+              Autocomplete.LoginSelectOption(entry)
+            }
+            scope.launch(Dispatchers.Main) {
+              if (_selectPrompt.value == null) {
+                requestLoginSelect(
+                  tabId = tabId,
+                  origin = origin,
+                  options = options,
+                  onSelect = { option ->
+                    val chosen = option.value
+                    if (chosen != null) {
+                      blockExtension.sendAutofillCredentials(tabId, chosen.username ?: "", chosen.password ?: "")
+                    }
+                  },
+                  onDismiss = {}
+                )
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   fun checkFortKnox() {
@@ -83,11 +147,6 @@ class PasswordAutofillCoordinator(
     onSelect: (Autocomplete.LoginSelectOption) -> Unit,
     onDismiss: () -> Unit,
   ) {
-    if (passwordRepo.isFortKnoxInstalled()) {
-      onDismiss()
-      return
-    }
-
     _selectPrompt.value = SelectPasswordPromptRequest(
       tabId = tabId,
       origin = origin,
@@ -107,32 +166,37 @@ class PasswordAutofillCoordinator(
     tabId: String,
     origin: String,
     username: String,
+    password: String = "",
     onSave: () -> Unit,
     onDismiss: () -> Unit,
   ) {
-    if (!origin.startsWith("https://", ignoreCase = true)) {
-      Log.i(TAG, "Refusing password save on non-HTTPS origin ($origin)")
-      onDismiss()
-      return
-    }
-    if (passwordRepo.isFortKnoxInstalled()) {
-      Log.i(TAG, "Fort Knox priority active. Suppressing built-in save prompt.")
-      onDismiss()
-      return
-    }
-    
-    // BUG B FIX: Do not show the save prompt if the vault is locked.
-    if (!passwordRepo.isUnlocked()) {
-      Log.i(TAG, "Vault is locked. Suppressing password save prompt to prevent silent failures.")
+    val canonical = PasswordCryptoEngine.canonicalizeOrigin(origin) ?: origin
+    if (canonical.isBlank()) {
+      Log.i(TAG, "Refusing password save on empty origin ($origin)")
       onDismiss()
       return
     }
 
     _savePrompt.value = SavePasswordPromptRequest(
       tabId = tabId,
-      origin = origin,
+      origin = canonical,
       username = username,
+      password = password,
       onSave = {
+        scope.launch(Dispatchers.IO) {
+          try {
+            if (password.isNotEmpty() && passwordRepo.isUnlocked()) {
+              passwordRepo.saveOrUpdateEntry(
+                url = canonical,
+                username = username,
+                password = password,
+              )
+              Log.i(TAG, "Direct coordinator save successful for origin: $canonical user: $username")
+            }
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed saving password direct in coordinator: ${e.message}")
+          }
+        }
         onSave()
         _savePrompt.value = null
       },

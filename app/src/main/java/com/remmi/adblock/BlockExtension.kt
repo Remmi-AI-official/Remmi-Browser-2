@@ -143,6 +143,42 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
     log("[WEBEXT] Extension registration failed: $reason")
   }
 
+  // Autofill Bridge Callbacks & Dispatch
+  private val authFormListeners = java.util.concurrent.CopyOnWriteArrayList<(tabId: String, origin: String, user: String, pass: String) -> Unit>()
+  private val authFocusListeners = java.util.concurrent.CopyOnWriteArrayList<(tabId: String, origin: String, isPassword: Boolean) -> Unit>()
+
+  fun addAuthFormListener(listener: (tabId: String, origin: String, user: String, pass: String) -> Unit) {
+    authFormListeners.add(listener)
+  }
+
+  fun removeAuthFormListener(listener: (tabId: String, origin: String, user: String, pass: String) -> Unit) {
+    authFormListeners.remove(listener)
+  }
+
+  fun addAuthFocusListener(listener: (tabId: String, origin: String, isPassword: Boolean) -> Unit) {
+    authFocusListeners.add(listener)
+  }
+
+  fun removeAuthFocusListener(listener: (tabId: String, origin: String, isPassword: Boolean) -> Unit) {
+    authFocusListeners.remove(listener)
+  }
+
+  fun sendAutofillCredentials(tabId: String, user: String, pass: String) {
+    val msg = JSONObject().apply {
+      put("type", "AUTOFILL_FILL_CREDENTIALS")
+      put("tabId", tabId)
+      put("username", user)
+      put("password", pass)
+    }
+    synchronized(portLock) {
+      try {
+        activePort?.postMessage(msg)
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed sending autofill credentials via port: ${e.message}")
+      }
+    }
+  }
+
   private val extensionScope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
 
   private fun parseMessage(message: Any): JSONObject? {
@@ -215,6 +251,25 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
           put("pong", true)
         }
       )
+    }
+
+    if (type == "AUTH_FORM_SUBMITTED") {
+      val submittedOrigin = messageJson.optString("origin")
+      val submittedUser = messageJson.optString("username")
+      val submittedPass = messageJson.optString("password")
+      val targetTab = messageJson.optString("tabId")
+      Log.i(TAG, "[AUTOFILL_BRIDGE] onMessage AUTH_FORM_SUBMITTED received for origin=$submittedOrigin user=$submittedUser")
+      authFormListeners.forEach { it(targetTab, submittedOrigin, submittedUser, submittedPass) }
+      return org.mozilla.geckoview.GeckoResult.fromValue(JSONObject().apply { put("ok", true) })
+    }
+
+    if (type == "AUTH_FIELD_FOCUSED") {
+      val focusedOrigin = messageJson.optString("origin")
+      val isPassword = messageJson.optBoolean("isPassword", false)
+      val targetTab = messageJson.optString("tabId")
+      Log.d(TAG, "[AUTOFILL_BRIDGE] onMessage AUTH_FIELD_FOCUSED for origin=$focusedOrigin isPassword=$isPassword")
+      authFocusListeners.forEach { it(targetTab, focusedOrigin, isPassword) }
+      return org.mozilla.geckoview.GeckoResult.fromValue(JSONObject().apply { put("ok", true) })
     }
 
     if (type == "BLOCK_ELEMENT") {
@@ -1080,6 +1135,33 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                   listener(candidatesList, hasOverlay, intercepted, pageUrl)
                 } catch (e: Exception) {
                   log("[WEBEXT] Click listener error: ${e.message}")
+                }
+              }
+            }
+            "AUTH_FORM_SUBMITTED" -> {
+              val submittedOrigin = message.optString("origin")
+              val submittedUser = message.optString("username")
+              val submittedPass = message.optString("password")
+              val targetTab = message.optString("tabId")
+              Log.i(TAG, "[AUTOFILL_BRIDGE] AUTH_FORM_SUBMITTED received on port for origin=$submittedOrigin user=$submittedUser")
+              authFormListeners.forEach { listener ->
+                try {
+                  listener(targetTab, submittedOrigin, submittedUser, submittedPass)
+                } catch (e: Exception) {
+                  Log.w(TAG, "Error in auth form listener: ${e.message}")
+                }
+              }
+            }
+            "AUTH_FIELD_FOCUSED" -> {
+              val focusedOrigin = message.optString("origin")
+              val isPassword = message.optBoolean("isPassword", false)
+              val targetTab = message.optString("tabId")
+              Log.d(TAG, "[AUTOFILL_BRIDGE] AUTH_FIELD_FOCUSED received on port for origin=$focusedOrigin isPassword=$isPassword")
+              authFocusListeners.forEach { listener ->
+                try {
+                  listener(targetTab, focusedOrigin, isPassword)
+                } catch (e: Exception) {
+                  Log.w(TAG, "Error in auth focus listener: ${e.message}")
                 }
               }
             }

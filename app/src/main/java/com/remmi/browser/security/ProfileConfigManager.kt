@@ -150,6 +150,15 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("""user_pref("apz.allow_zooming", true);""")
       appendLine("""user_pref("image.mem.surfacecache.max_size_kb", 24576);""")
       appendLine("""user_pref("browser.low_end_device_optimizations", true);""")
+      appendLine()
+      appendLine("// Form & Password Manager Engine Integration")
+      appendLine("""user_pref("signon.rememberSignons", true);""")
+      appendLine("""user_pref("signon.autofillForms", true);""")
+      appendLine("""user_pref("signon.formlessCapture.enabled", true);""")
+      appendLine("""user_pref("signon.storeWhenAutocompleteOff", true);""")
+      appendLine("""user_pref("signon.overrideAutocompleteOff", true);""")
+      appendLine("""user_pref("signon.showAutoCompleteFooter", true);""")
+      appendLine("""user_pref("signon.schemeUpgrades", true);""")
     }
   }
 

@@ -243,151 +243,155 @@ fun ReadingListScreen(
           modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          // Left: Back button & Title
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          // Left: Back button (Clean compact alignment)
+          Surface(
+            onClick = onDismiss,
+            shape = RoundedCornerShape(8.dp),
+            color = if (isLight) Color(0xFFF1F5F9) else Color(0xFF1E293B),
+            border = BorderStroke(0.8.dp, if (isLight) Color(0xFFCBD5E1) else Color(0xFF334155)),
+            modifier = Modifier
+              .size(32.dp)
+              .testTag("reading_list_back_btn")
           ) {
-            IconButton(
-              onClick = onDismiss,
-              modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(if (isLight) Color(0xFFF1F5F9) else Color(0xFF1E293B))
-                .testTag("reading_list_back_btn")
-            ) {
+            Box(contentAlignment = Alignment.Center) {
               Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
                 tint = textColor,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.width(10.dp))
+
+          // Middle: Title & Stat Badges (flexible weight)
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(24.dp)
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(getReadingFolderColor("all", isLight).copy(alpha = if (isLight) 0.15f else 0.25f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.MenuBook,
+                  contentDescription = null,
+                  tint = getReadingFolderColor("all", isLight),
+                  modifier = Modifier.size(14.dp)
+                )
+              }
+              Text(
+                text = "Reading List",
+                fontFamily = ThemeCyber.fontFamily,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            // Visual Stats Mini-Pills with high-contrast, vibrant tag colors
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (isLight) Color(0xFFEFF6FF) else Color(0xFF1E293B),
+                border = BorderStroke(0.6.dp, if (isLight) Color(0xFFBFDBFE) else Color(0xFF334155))
               ) {
-                Box(
-                  modifier = Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(getReadingFolderColor("all", isLight).copy(alpha = if (isLight) 0.15f else 0.25f)),
-                  contentAlignment = Alignment.Center
-                ) {
-                  Icon(
-                    imageVector = Icons.Default.MenuBook,
-                    contentDescription = null,
-                    tint = getReadingFolderColor("all", isLight),
-                    modifier = Modifier.size(17.dp)
-                  )
-                }
                 Text(
-                  text = "Reading List",
-                  fontFamily = ThemeCyber.fontFamily,
-                  fontSize = 18.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = textColor
+                  text = "${allReadings.size} saved",
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = if (isLight) Color(0xFF1D4ED8) else Color(0xFF60A5FA),
+                  modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                  maxLines = 1,
+                  softWrap = false
                 )
               }
 
-              // Visual Stats Mini-Pills with high-contrast, vibrant tag colors
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-              ) {
+              if (unreadCount > 0) {
                 Surface(
-                  shape = RoundedCornerShape(10.dp),
-                  color = if (isLight) Color(0xFFEFF6FF) else Color(0xFF1E293B),
-                  border = BorderStroke(0.6.dp, if (isLight) Color(0xFFBFDBFE) else Color(0xFF334155))
+                  shape = RoundedCornerShape(6.dp),
+                  color = if (isLight) Color(0xFFF0FDFA) else Color(0xFF132A32),
+                  border = BorderStroke(0.6.dp, if (isLight) Color(0xFF99F6E4) else Color(0xFF0F766E))
                 ) {
                   Text(
-                    text = "${allReadings.size} saved",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isLight) Color(0xFF1D4ED8) else Color(0xFF60A5FA),
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                  )
-                }
-
-                if (unreadCount > 0) {
-                  Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isLight) Color(0xFFF0FDFA) else Color(0xFF132A32),
-                    border = BorderStroke(0.6.dp, if (isLight) Color(0xFF99F6E4) else Color(0xFF0F766E))
-                  ) {
-                    Text(
-                      text = "${unreadCount} unread",
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = if (isLight) Color(0xFF0D9488) else Color(0xFF2DD4BF),
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                  }
-                }
-
-                Surface(
-                  shape = RoundedCornerShape(10.dp),
-                  color = if (isLight) Color(0xFFFFFBEB) else Color(0xFF2A2210),
-                  border = BorderStroke(0.6.dp, if (isLight) Color(0xFFFDE68A) else Color(0xFF78350F))
-                ) {
-                  Text(
-                    text = "~${totalReadTimeMinutes}m total",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isLight) Color(0xFFB45309) else Color(0xFFFBBF24),
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    text = "${unreadCount} unread",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isLight) Color(0xFF0D9488) else Color(0xFF2DD4BF),
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                    maxLines = 1,
+                    softWrap = false
                   )
                 }
               }
             }
           }
 
-          // Right: Action Buttons (Add Folder, Sort, Clear All)
+          Spacer(modifier = Modifier.width(8.dp))
+
+          // Right: Action Buttons (Add Folder, Sort) - Fixed sized containers with clear spacing so they never overlap
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.wrapContentWidth()
           ) {
             // New Folder Action
-            IconButton(
+            Surface(
               onClick = {
                 newFolderNameInput = ""
                 showNewFolderDialog = true
               },
+              shape = RoundedCornerShape(8.dp),
+              color = getReadingFolderColor("general", isLight).copy(alpha = if (isLight) 0.12f else 0.22f),
+              border = BorderStroke(0.8.dp, getReadingFolderColor("general", isLight).copy(alpha = 0.35f)),
               modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(getReadingFolderColor("general", isLight).copy(alpha = if (isLight) 0.12f else 0.22f))
+                .size(32.dp)
                 .testTag("reading_list_add_folder_btn")
             ) {
-              Icon(
-                imageVector = Icons.Default.CreateNewFolder,
-                contentDescription = "New Folder",
-                tint = getReadingFolderColor("general", isLight),
-                modifier = Modifier.size(19.dp)
-              )
+              Box(contentAlignment = Alignment.Center) {
+                Icon(
+                  imageVector = Icons.Default.CreateNewFolder,
+                  contentDescription = "New Folder",
+                  tint = getReadingFolderColor("general", isLight),
+                  modifier = Modifier.size(16.dp)
+                )
+              }
             }
 
             // Sort Menu Action
-            Box {
-              IconButton(
+            Box(modifier = Modifier.size(32.dp)) {
+              Surface(
                 onClick = { showSortMenu = true },
+                shape = RoundedCornerShape(8.dp),
+                color = if (isLight) Color(0xFFF1F5F9) else Color(0xFF1E293B),
+                border = BorderStroke(0.8.dp, if (isLight) Color(0xFFCBD5E1) else Color(0xFF334155)),
                 modifier = Modifier
-                  .size(36.dp)
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(if (isLight) Color(0xFFF1F5F9) else Color(0xFF1E293B))
+                  .fillMaxSize()
                   .testTag("reading_list_sort_btn")
               ) {
-                Icon(
-                  imageVector = Icons.Default.Sort,
-                  contentDescription = "Sort Articles",
-                  tint = textColor,
-                  modifier = Modifier.size(19.dp)
-                )
+                Box(contentAlignment = Alignment.Center) {
+                  Icon(
+                    imageVector = Icons.Default.Sort,
+                    contentDescription = "Sort Articles",
+                    tint = textColor,
+                    modifier = Modifier.size(16.dp)
+                  )
+                }
               }
 
               DropdownMenu(
@@ -1252,23 +1256,24 @@ private fun ReadingItemCard(
               border = BorderStroke(1.dp, if (isLight) Color(0xFFCBD5E1) else Color(0xFF334155))
             ) {
               Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
               ) {
                 Icon(
                   imageVector = Icons.Default.Language,
                   contentDescription = null,
                   tint = if (isLight) Color(0xFF1D4ED8) else Color(0xFF38BDF8),
-                  modifier = Modifier.size(13.dp)
+                  modifier = Modifier.size(12.dp)
                 )
                 Text(
                   text = item.domain.ifBlank { "web" },
-                  fontSize = 11.sp,
+                  fontSize = 10.5.sp,
                   fontWeight = FontWeight.Bold,
                   color = if (isLight) Color(0xFF1E293B) else Color(0xFFF1F5F9),
                   maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.widthIn(max = 100.dp)
                 )
               }
             }
@@ -1280,7 +1285,7 @@ private fun ReadingItemCard(
               border = BorderStroke(1.dp, folderColor.copy(alpha = if (isLight) 0.5f else 0.7f))
             ) {
               Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
               ) {
@@ -1288,15 +1293,16 @@ private fun ReadingItemCard(
                   imageVector = Icons.Default.Folder,
                   contentDescription = null,
                   tint = folderColor,
-                  modifier = Modifier.size(12.dp)
+                  modifier = Modifier.size(11.dp)
                 )
                 Text(
                   text = item.folder,
-                  fontSize = 10.5.sp,
+                  fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
                   color = folderColor,
                   maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.widthIn(max = 85.dp)
                 )
               }
             }
@@ -1309,19 +1315,19 @@ private fun ReadingItemCard(
                 border = BorderStroke(1.dp, if (isLight) Color(0xFF7DD3FC) else Color(0xFF0284C7))
               ) {
                 Row(
-                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                  modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.5.dp),
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                   Box(
                     modifier = Modifier
-                      .size(6.dp)
+                      .size(5.dp)
                       .clip(CircleShape)
                       .background(if (isLight) Color(0xFF0284C7) else Color(0xFF38BDF8))
                   )
                   Text(
                     text = "UNREAD",
-                    fontSize = 9.sp,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = if (isLight) Color(0xFF0369A1) else Color(0xFF38BDF8)
                   )
@@ -1337,26 +1343,26 @@ private fun ReadingItemCard(
           ) {
             IconButton(
               onClick = onToggleFavorite,
-              modifier = Modifier.size(32.dp)
+              modifier = Modifier.size(30.dp)
             ) {
               Icon(
                 imageVector = if (item.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
                 contentDescription = "Favorite",
                 tint = if (item.isFavorite) Color(0xFFF59E0B) else (if (isLight) Color(0xFF94A3B8) else Color(0xFF64748B)),
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
               )
             }
 
-            Box {
+            Box(modifier = Modifier.size(30.dp)) {
               IconButton(
                 onClick = { showMenu = true },
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.fillMaxSize()
               ) {
                 Icon(
                   imageVector = Icons.Default.MoreVert,
                   contentDescription = "Options",
                   tint = if (isLight) Color(0xFF64748B) else Color(0xFF94A3B8),
-                  modifier = Modifier.size(20.dp)
+                  modifier = Modifier.size(18.dp)
                 )
               }
 
@@ -1460,36 +1466,33 @@ private fun ReadingItemCard(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          // Left: Date, Time & Reading Time tag
+          // Left: Date & Reading Time tag (clean single line without overflow)
           Row(
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
           ) {
-            // Calendar icon + Date and Time
+            // Calendar icon + Date
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(3.dp)
+              horizontalArrangement = Arrangement.spacedBy(3.dp),
+              modifier = Modifier.weight(1f, fill = false)
             ) {
               Icon(
                 imageVector = Icons.Default.Schedule,
                 contentDescription = null,
                 tint = if (isLight) Color(0xFF64748B) else Color(0xFF94A3B8),
-                modifier = Modifier.size(13.dp)
+                modifier = Modifier.size(12.dp)
               )
               Text(
-                text = "$formattedDate • $formattedTime",
-                fontSize = 11.sp,
+                text = formattedDate,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (isLight) Color(0xFF475569) else Color(0xFF94A3B8)
+                color = if (isLight) Color(0xFF475569) else Color(0xFF94A3B8),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
-
-            Text(
-              text = "•",
-              fontSize = 10.sp,
-              color = if (isLight) Color(0xFFCBD5E1) else Color(0xFF475569)
-            )
 
             // Reading Time Badge
             Surface(
@@ -1498,56 +1501,43 @@ private fun ReadingItemCard(
               border = BorderStroke(0.8.dp, if (isLight) Color(0xFFFDE68A) else Color(0xFF78350F))
             ) {
               Text(
-                text = "~${item.readingTimeMinutes} min",
-                fontSize = 10.5.sp,
+                text = "~${item.readingTimeMinutes}m",
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isLight) Color(0xFFB45309) else Color(0xFFFBBF24),
-                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                maxLines = 1,
+                softWrap = false
               )
-            }
-
-            // Word Count Badge
-            if (item.wordCount > 0) {
-              Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = if (isLight) Color(0xFFF1F5F9) else Color(0xFF1E293B)
-              ) {
-                Text(
-                  text = "${item.wordCount} words",
-                  fontSize = 10.sp,
-                  fontWeight = FontWeight.Medium,
-                  color = if (isLight) Color(0xFF475569) else Color(0xFF94A3B8),
-                  modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                )
-              }
             }
           }
 
           Spacer(modifier = Modifier.width(6.dp))
 
-          // Right: Offline Ready Badge (single line, crisp emerald green, perfect visibility!)
+          // Right: Offline Ready Badge (compact, crisp emerald green)
           Surface(
             shape = RoundedCornerShape(6.dp),
             color = if (isLight) Color(0xFFECFDF5) else Color(0xFF064E3B).copy(alpha = 0.6f),
             border = BorderStroke(1.dp, if (isLight) Color(0xFF6EE7B7) else Color(0xFF059669))
           ) {
             Row(
-              modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.5.dp),
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+              horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
               Icon(
                 imageVector = Icons.Default.CheckCircle,
                 contentDescription = null,
                 tint = if (isLight) Color(0xFF059669) else Color(0xFF34D399),
-                modifier = Modifier.size(13.dp)
+                modifier = Modifier.size(11.dp)
               )
               Text(
-                text = "Offline Ready",
-                fontSize = 10.sp,
+                text = "Offline",
+                fontSize = 9.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isLight) Color(0xFF065F46) else Color(0xFF6EE7B7),
-                maxLines = 1
+                maxLines = 1,
+                softWrap = false
               )
             }
           }
