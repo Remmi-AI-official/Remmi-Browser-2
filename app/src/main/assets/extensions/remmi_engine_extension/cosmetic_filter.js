@@ -68,10 +68,18 @@
     }
 
     const chunk = PENDING_INJECTIONS.splice(0, PENDING_INJECTIONS.length);
-    const cssText = chunk.join(',\n') + ' { display: none !important; }\n';
-    try {
-      styleEl.textContent += cssText;
-    } catch (_e) {}
+    if (styleEl.sheet) {
+      for (let i = 0; i < chunk.length; i++) {
+        try {
+          styleEl.sheet.insertRule(chunk[i] + ' { display: none !important; }', styleEl.sheet.cssRules.length);
+        } catch (_e) {}
+      }
+    } else {
+      const cssText = chunk.join(',\n') + ' { display: none !important; }\n';
+      try {
+        styleEl.textContent += cssText;
+      } catch (_e) {}
+    }
   }
 
   function injectSelectors(selectors) {

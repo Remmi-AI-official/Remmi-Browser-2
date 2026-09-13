@@ -413,6 +413,7 @@ fun BrowserView(
             swipeLayout.addView(this)
           }
           alpha = 1f
+          setDynamicToolbarMaxHeight(0)
           geckoViewRef = this
         }
         swipeLayout.canScrollUpCallback = {
@@ -466,6 +467,7 @@ fun BrowserView(
         }
         val geckoView = targetGeckoView
         geckoView.alpha = 1f
+        geckoView.setDynamicToolbarMaxHeight(0)
         geckoViewRef = geckoView
         val prevTag = geckoView.tag as? String
         val isTagMatch = prevTag == tab.id

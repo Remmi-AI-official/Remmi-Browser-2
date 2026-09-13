@@ -252,6 +252,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       isFocusable = true
       isFocusableInTouchMode = true
       isNestedScrollingEnabled = false
+      setDynamicToolbarMaxHeight(0)
       tag = tabId
     }
     geckoViewPool[tabId] = newView

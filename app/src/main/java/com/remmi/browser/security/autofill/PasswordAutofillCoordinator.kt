@@ -166,6 +166,16 @@ class PasswordAutofillCoordinator(
     tabId: String,
     origin: String,
     username: String,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+  ) {
+    requestLoginSave(tabId, origin, username, "", onSave, onDismiss)
+  }
+
+  fun requestLoginSave(
+    tabId: String,
+    origin: String,
+    username: String,
     password: String = "",
     onSave: () -> Unit,
     onDismiss: () -> Unit,
@@ -173,6 +183,24 @@ class PasswordAutofillCoordinator(
     val canonical = PasswordCryptoEngine.canonicalizeOrigin(origin) ?: origin
     if (canonical.isBlank()) {
       Log.i(TAG, "Refusing password save on empty origin ($origin)")
+      onDismiss()
+      return
+    }
+
+    if (passwordRepo.isFortKnoxInstalled()) {
+      Log.i(TAG, "Suppressed password save because FortKnox is installed")
+      onDismiss()
+      return
+    }
+
+    if (!passwordRepo.isUnlocked()) {
+      Log.i(TAG, "Suppressed password save because Vault is locked")
+      onDismiss()
+      return
+    }
+
+    if (!canonical.startsWith("https://") && !origin.startsWith("https://")) {
+      Log.i(TAG, "Refusing password save on insecure origin ($origin)")
       onDismiss()
       return
     }
