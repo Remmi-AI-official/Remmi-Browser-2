@@ -98,6 +98,7 @@ fun TerminalUrlBar(
   activePermissionState: com.remmi.browser.security.permissions.ActivePermissionState? = null,
   onUrlSubmit: (String) -> Unit,
   onReload: () -> Unit,
+  onHomeClick: () -> Unit = { onUrlSubmit("about:home") },
   onStop: (() -> Unit)? = null,
   onToggleBookmark: () -> Unit = {},
   onToggleReader: () -> Unit = {},
@@ -216,7 +217,7 @@ fun TerminalUrlBar(
     ) {
       // Home Button
       IconButton(
-        onClick = { onUrlSubmit("about:home") },
+        onClick = onHomeClick,
         modifier = Modifier.size(36.dp)
       ) {
         Icon(

@@ -779,17 +779,53 @@ fun BrowserScreen(
                 isReaderActive = activeTab.isReaderMode,
                 activePermissionState = activePermissionIndicators[activeTab.id],
                 onUrlSubmit = { target ->
-                  val sanitized = NetworkHardening.sanitizeUrl(target)
-                  val currentTab = activeTab
-                  if (currentTab.url == sanitized) {
-                    tabManager.updateTab(currentTab.id) { it.copy(isLoading = true, progress = 15) }
-                    geckoEngine.reload(currentTab.id)
-                  } else {
-                    tabManager.updateTab(currentTab.id) {
-                      it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                  val isHome = target.isBlank() || target == "about:blank" || target == "about:home" || target == "remmi://newtab"
+                  if (isHome) {
+                    homeRequestedByTab[activeTab.id] = true
+                    backToHomePendingByTab.remove(activeTab.id)
+                    tabManager.updateTab(activeTab.id) {
+                      it.copy(
+                        url = "about:blank",
+                        title = "New Tab",
+                        canGoBack = false,
+                        canGoForward = false,
+                        isReaderMode = false,
+                        isSecure = true,
+                        readerArticle = null
+                      )
                     }
-                    geckoEngine.loadUrl(currentTab.id, sanitized)
+                    geckoEngine.loadUrl(activeTab.id, "about:blank")
+                  } else {
+                    val sanitized = NetworkHardening.sanitizeUrl(target)
+                    val currentTab = activeTab
+                    homeRequestedByTab[currentTab.id] = false
+                    backToHomePendingByTab.remove(currentTab.id)
+                    if (currentTab.url == sanitized) {
+                      tabManager.updateTab(currentTab.id) { it.copy(isLoading = true, progress = 15) }
+                      geckoEngine.reload(currentTab.id)
+                    } else {
+                      tabManager.updateTab(currentTab.id) {
+                        it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                      }
+                      geckoEngine.loadUrl(currentTab.id, sanitized)
+                    }
                   }
+                },
+                onHomeClick = {
+                  homeRequestedByTab[activeTab.id] = true
+                  backToHomePendingByTab.remove(activeTab.id)
+                  tabManager.updateTab(activeTab.id) {
+                    it.copy(
+                      url = "about:blank",
+                      title = "New Tab",
+                      canGoBack = false,
+                      canGoForward = false,
+                      isReaderMode = false,
+                      isSecure = true,
+                      readerArticle = null
+                    )
+                  }
+                  geckoEngine.loadUrl(activeTab.id, "about:blank")
                 },
                 onReload = {
                   tabManager.updateTab(activeTab.id) { it.copy(isLoading = true, progress = 15) }

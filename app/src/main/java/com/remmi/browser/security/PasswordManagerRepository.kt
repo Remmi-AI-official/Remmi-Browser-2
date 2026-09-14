@@ -637,13 +637,38 @@ class PasswordManagerRepository private constructor(
   // --- Vault Lock / Zeroize ---
   fun lockVault() {
     scope.launch(Dispatchers.IO) {
-      if (hasCustomMasterPassword()) {
-        val state = _lockState.value
-        if (state is VaultLockState.Unlocked) {
-          PasswordCryptoEngine.zeroize(state.dek)
-        }
-        _lockState.value = VaultLockState.Locked
+      val state = _lockState.value
+      if (state is VaultLockState.Unlocked) {
+        PasswordCryptoEngine.zeroize(state.dek)
       }
+      _lockState.value = VaultLockState.Locked
+    }
+  }
+
+  suspend fun unlockWithDeviceBiometrics(): Result<Unit> = withContext(Dispatchers.IO) {
+    val currentLock = _lockState.value
+    if (currentLock is VaultLockState.TemporarilyLocked) {
+      return@withContext Result.failure(IllegalStateException("Vault locked for ${currentLock.remainingSeconds}s due to failed attempts."))
+    }
+    if (currentLock is VaultLockState.CompromisedDevice) {
+      return@withContext Result.failure(SecurityException("Device integrity compromised. Password vault blocked."))
+    }
+
+    val metadata = getDb().masterKeyMetadataDao().getMetadata()
+      ?: return@withContext Result.failure(IllegalStateException("Vault uninitialized."))
+
+    try {
+      val dek = if (metadata.kdfParams == "DEVICE_KEYSTORE") {
+        PasswordCryptoEngine.unwrapDekWithDeviceKey(metadata.encryptedDek, metadata.dekIv, metadata.dekAuthTag)
+      } else {
+        return@withContext Result.failure(IllegalStateException("Master password or PIN required."))
+      }
+      resetFailedAttempts()
+      _lockState.value = VaultLockState.Unlocked(dek)
+      return@withContext Result.success(Unit)
+    } catch (e: Exception) {
+      Log.w(TAG, "Device biometric unlock error: ${e.message}")
+      return@withContext Result.failure(e)
     }
   }
 

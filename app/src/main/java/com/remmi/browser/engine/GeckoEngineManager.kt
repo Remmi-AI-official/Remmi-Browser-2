@@ -1358,7 +1358,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       )
       val autofillPrefs = mapOf(
         "signon.rememberSignons" to true,
-        "signon.autofillForms" to true,
+        "signon.autofillForms" to false,
         "signon.formlessCapture.enabled" to true,
         "signon.storeWhenAutocompleteOff" to true,
         "signon.overrideAutocompleteOff" to true,

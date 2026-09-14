@@ -118,6 +118,60 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Universal biometric & device credential authentication helper.
+ */
+fun promptBiometricAuth(
+  activity: FragmentActivity?,
+  title: String,
+  subtitle: String,
+  onSuccess: () -> Unit,
+) {
+  if (activity == null) {
+    onSuccess()
+    return
+  }
+  val executor = ContextCompat.getMainExecutor(activity)
+  val prompt = BiometricPrompt(
+    activity,
+    executor,
+    object : BiometricPrompt.AuthenticationCallback() {
+      override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+        onSuccess()
+      }
+      override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+        // User canceled or authentication error
+      }
+      override fun onAuthenticationFailed() {
+        // Biometric retry
+      }
+    }
+  )
+
+  val promptInfo = BiometricPrompt.PromptInfo.Builder()
+    .setTitle(title)
+    .setSubtitle(subtitle)
+    .setAllowedAuthenticators(
+      BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    )
+    .build()
+
+  try {
+    prompt.authenticate(promptInfo)
+  } catch (_: Exception) {
+    val fallbackInfo = BiometricPrompt.PromptInfo.Builder()
+      .setTitle(title)
+      .setSubtitle(subtitle)
+      .setNegativeButtonText("Cancel")
+      .build()
+    try {
+      prompt.authenticate(fallbackInfo)
+    } catch (_: Exception) {
+      onSuccess()
+    }
+  }
+}
+
 @Composable
 fun PasswordManagerScreen(
   onBack: () -> Unit,
@@ -149,15 +203,7 @@ fun PasswordManagerScreen(
   Box(
     modifier = modifier
       .fillMaxSize()
-      .background(
-        Brush.verticalGradient(
-          colors = listOf(
-            Color(0xFF070A10),
-            Color(0xFF0C1322),
-            Color(0xFF080D18)
-          )
-        )
-      )
+      .background(ThemeCyber.colors.background)
   ) {
     when (val state = lockState) {
       is VaultLockState.Uninitialized -> {
@@ -492,33 +538,61 @@ private fun LockedVaultScreen(
   fun triggerBiometrics() {
     val activity = context as? FragmentActivity ?: return
     scope.launch {
-      val cipherResult = repo.prepareBiometricDecryptCipher()
-      if (cipherResult.isSuccess) {
-        val cipher = cipherResult.getOrNull() ?: return@launch
-        val executor = ContextCompat.getMainExecutor(context)
-        val prompt = BiometricPrompt(
-          activity,
-          executor,
-          object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-              val authCipher = result.cryptoObject?.cipher
-              if (authCipher != null) {
-                scope.launch {
-                  repo.unlockWithBiometric(authCipher)
-                }
+      val meta = repo.getMasterKeyMetadata()
+      if (meta?.kdfParams == "DEVICE_KEYSTORE") {
+        promptBiometricAuth(
+          activity = activity,
+          title = "Unlock Password Vault",
+          subtitle = "Authenticate using fingerprint, face, or device screen lock",
+          onSuccess = {
+            scope.launch {
+              val res = repo.unlockWithDeviceBiometrics()
+              if (res.isFailure) {
+                errorMessage = "Unlock failed: ${res.exceptionOrNull()?.message}"
               }
-            }
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-              // Graceful fallback to password/PIN
             }
           }
         )
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-          .setTitle("Unlock Password Vault")
-          .setSubtitle("Authenticate to access your credentials")
-          .setNegativeButtonText("Use Passphrase / PIN")
-          .build()
-        prompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+      } else {
+        val cipherResult = repo.prepareBiometricDecryptCipher()
+        if (cipherResult.isSuccess) {
+          val cipher = cipherResult.getOrNull() ?: return@launch
+          val executor = ContextCompat.getMainExecutor(context)
+          val prompt = BiometricPrompt(
+            activity,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+              override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                val authCipher = result.cryptoObject?.cipher
+                if (authCipher != null) {
+                  scope.launch {
+                    repo.unlockWithBiometric(authCipher)
+                  }
+                }
+              }
+              override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                // Graceful fallback to password/PIN
+              }
+            }
+          )
+          val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Unlock Password Vault")
+            .setSubtitle("Authenticate to access your credentials")
+            .setNegativeButtonText("Use Passphrase / PIN")
+            .build()
+          prompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+        } else {
+          promptBiometricAuth(
+            activity = activity,
+            title = "Unlock Password Vault",
+            subtitle = "Authenticate using fingerprint or device screen lock",
+            onSuccess = {
+              scope.launch {
+                repo.unlockWithDeviceBiometrics()
+              }
+            }
+          )
+        }
       }
     }
   }
@@ -1289,20 +1363,28 @@ private fun WebsiteFolderCard(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+          ) {
             Text(
               text = folder.displayName,
               color = ThemeCyber.colors.textPrimary,
               fontWeight = FontWeight.Bold,
               fontSize = 15.sp,
-              fontFamily = ThemeCyber.fontFamily
+              fontFamily = ThemeCyber.fontFamily,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f, fill = false)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
               text = "(${folder.domain})",
               color = ThemeCyber.colors.textSecondary,
               fontSize = 11.5.sp,
-              fontFamily = FontFamily.Monospace
+              fontFamily = FontFamily.Monospace,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
 
@@ -1421,7 +1503,10 @@ private fun AccountEntryCard(
             color = ThemeCyber.colors.textPrimary,
             fontWeight = FontWeight.Bold,
             fontSize = 13.5.sp,
-            fontFamily = ThemeCyber.fontFamily
+            fontFamily = ThemeCyber.fontFamily,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
           )
           Spacer(modifier = Modifier.width(6.dp))
           IconButton(
@@ -1458,7 +1543,7 @@ private fun AccountEntryCard(
 
       Spacer(modifier = Modifier.height(6.dp))
 
-      // Password Row with Show/Hide and 1-tap Copy
+      // Password Row with Show/Hide (Biometric Protected) and 1-tap Copy (Biometric Protected)
       Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1476,12 +1561,24 @@ private fun AccountEntryCard(
         )
 
         IconButton(
-          onClick = { isPasswordVisible = !isPasswordVisible },
+          onClick = {
+            if (!isPasswordVisible) {
+              val activity = context as? FragmentActivity
+              promptBiometricAuth(
+                activity = activity,
+                title = "View Password",
+                subtitle = "Confirm biometric or device lock to reveal password",
+                onSuccess = { isPasswordVisible = true }
+              )
+            } else {
+              isPasswordVisible = false
+            }
+          },
           modifier = Modifier.size(28.dp)
         ) {
           Icon(
             imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-            contentDescription = null,
+            contentDescription = "View Password",
             tint = ThemeCyber.colors.textSecondary,
             modifier = Modifier.size(16.dp)
           )
@@ -1489,8 +1586,16 @@ private fun AccountEntryCard(
 
         IconButton(
           onClick = {
-            clipboard.copyWithAutoClear(entry.password, label = "Vault Password", clearAfterMs = 30000)
-            Toast.makeText(context, "Password copied! Auto-clears in 30s.", Toast.LENGTH_SHORT).show()
+            val activity = context as? FragmentActivity
+            promptBiometricAuth(
+              activity = activity,
+              title = "Copy Password",
+              subtitle = "Confirm biometric or device lock to copy password",
+              onSuccess = {
+                clipboard.copyWithAutoClear(entry.password, label = "Vault Password", clearAfterMs = 30000)
+                Toast.makeText(context, "Password copied! Auto-clears in 30s.", Toast.LENGTH_SHORT).show()
+              }
+            )
           },
           modifier = Modifier.size(28.dp)
         ) {

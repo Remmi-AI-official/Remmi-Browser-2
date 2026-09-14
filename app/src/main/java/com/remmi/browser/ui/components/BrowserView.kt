@@ -378,6 +378,14 @@ fun BrowserView(
   }
 
   val surfaceColor = if (ThemeCyber.colors.isLight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#121824")
+  val primaryColorInt = android.graphics.Color.argb(
+    (ThemeCyber.colors.primary.alpha * 255).toInt(),
+    (ThemeCyber.colors.primary.red * 255).toInt(),
+    (ThemeCyber.colors.primary.green * 255).toInt(),
+    (ThemeCyber.colors.primary.blue * 255).toInt()
+  )
+  val progressBgColor = if (ThemeCyber.colors.isLight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#1E2430")
+  val isRealWebPage = !tab.isReaderMode && tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
 
   Box(
     modifier = modifier
@@ -397,13 +405,13 @@ fun BrowserView(
             ViewGroup.LayoutParams.MATCH_PARENT
           )
           setBackgroundColor(surfaceColor)
-          isEnabled = false
+          isEnabled = isRealWebPage
           setColorSchemeColors(
+            primaryColorInt,
             android.graphics.Color.parseColor("#00E5FF"),
-            android.graphics.Color.parseColor("#7C4DFF"),
-            android.graphics.Color.parseColor("#00E676")
+            android.graphics.Color.parseColor("#7C4DFF")
           )
-          setProgressBackgroundColorSchemeColor(android.graphics.Color.parseColor("#121824"))
+          setProgressBackgroundColorSchemeColor(progressBgColor)
         }
         val gv = geckoEngine.getOrCreateGeckoView(ctx, tab.id).apply {
           if (parent !== swipeLayout) {
@@ -418,7 +426,7 @@ fun BrowserView(
         }
         swipeLayout.canScrollUpCallback = {
           val scrollY = geckoEngine.getScrollY(tab.id)
-          if (scrollY > 10) {
+          if (scrollY > 5) {
             true
           } else {
             gv.canScrollVertically(-1)
@@ -504,7 +512,7 @@ fun BrowserView(
         }
         swipeLayout.canScrollUpCallback = {
           val scrollY = geckoEngine.getScrollY(tab.id)
-          if (scrollY > 10) {
+          if (scrollY > 5) {
             true
           } else {
             geckoView.canScrollVertically(-1)
@@ -513,7 +521,13 @@ fun BrowserView(
         swipeLayout.setOnRefreshListener {
           geckoEngine.reload(tab.id)
         }
-        swipeLayout.isEnabled = false
+        swipeLayout.isEnabled = isRealWebPage
+        swipeLayout.setColorSchemeColors(
+          primaryColorInt,
+          android.graphics.Color.parseColor("#00E5FF"),
+          android.graphics.Color.parseColor("#7C4DFF")
+        )
+        swipeLayout.setProgressBackgroundColorSchemeColor(progressBgColor)
         if (!tab.isLoading && swipeLayout.isRefreshing) {
           swipeLayout.isRefreshing = false
         }

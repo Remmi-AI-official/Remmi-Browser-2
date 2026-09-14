@@ -157,7 +157,7 @@ class ProfileConfigManager(private val context: Context) {
       appendLine()
       appendLine("// Form & Password Manager Engine Integration")
       appendLine("""user_pref("signon.rememberSignons", true);""")
-      appendLine("""user_pref("signon.autofillForms", true);""")
+      appendLine("""user_pref("signon.autofillForms", false);""")
       appendLine("""user_pref("signon.formlessCapture.enabled", true);""")
       appendLine("""user_pref("signon.storeWhenAutocompleteOff", true);""")
       appendLine("""user_pref("signon.overrideAutocompleteOff", true);""")
