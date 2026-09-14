@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -1438,46 +1439,6 @@ private fun AppearanceSubScreen(
               )
             )
           }
-
-          Divider(
-            color = cardBorder.copy(alpha = 0.5f),
-            thickness = 0.8.dp,
-            modifier = Modifier.padding(vertical = 2.dp)
-          )
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-              Text(
-                text = "Cyberpunk HUD Theme",
-                color = textPrimary,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.Medium
-              )
-              Spacer(modifier = Modifier.height(3.dp))
-              Text(
-                text = "Enable futuristic Cyberpunk HUD accent themes and neon cyber styling. Kept OFF by default to maintain the clean standard Normal theme.",
-                color = textSecondary,
-                fontSize = 12.5.sp,
-                lineHeight = 16.sp
-              )
-            }
-            Switch(
-              checked = settings.cyberHudEnabled,
-              onCheckedChange = { enabled ->
-                settingsRepo.updateCyberHudEnabled(enabled)
-              },
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF388BFD)
-              )
-            )
-          }
         }
       }
     }
@@ -1485,7 +1446,7 @@ private fun AppearanceSubScreen(
     // Theme selection
     item {
       Spacer(modifier = Modifier.height(4.dp))
-      SubSectionHeader("CYBERPUNK HUD ACCENT THEME", textSecondary)
+      SubSectionHeader("BROWSER THEMES & ACCENTS", textSecondary)
     }
 
     item {
@@ -2446,7 +2407,7 @@ private fun DisplayViewportSubScreen(
   ) {
     item {
       Spacer(modifier = Modifier.height(2.dp))
-      SubSectionHeader("VIEWPORT & RENDERING", textSecondary)
+      SubSectionHeader("VIEWPORT & DISPLAY", textSecondary)
     }
 
     item {
@@ -2456,6 +2417,22 @@ private fun DisplayViewportSubScreen(
         subtitle = "Force true pitch-black (#000000) canvas for OLED battery efficiency.",
         checked = settings.pureBlackOled,
         onCheckedChange = { settingsRepo.updatePureBlackOled(it) },
+        badgeBg = cyanBg,
+        iconTint = cyanTint,
+        cardBg = cardBg,
+        cardBorder = cardBorder,
+        textPrimary = textPrimary,
+        textSecondary = textSecondary
+      )
+    }
+
+    item {
+      SubScreenToggleCard(
+        icon = Icons.Default.Palette,
+        title = "Dark Theme for all Webpages",
+        subtitle = "Automatically request dark color-scheme and dark stylesheets on all websites.",
+        checked = settings.darkThemeForAllWebPages,
+        onCheckedChange = { settingsRepo.updateDarkThemeForAllWebPages(it) },
         badgeBg = cyanBg,
         iconTint = cyanTint,
         cardBg = cardBg,
@@ -2498,7 +2475,7 @@ private fun DisplayViewportSubScreen(
     }
 
     item {
-      SubSectionHeader("READER VIEW DEFAULT FONT SIZE", textSecondary)
+      SubSectionHeader("READER VIEW TYPOGRAPHY & SIZE", textSecondary)
       Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
@@ -2506,7 +2483,7 @@ private fun DisplayViewportSubScreen(
           .fillMaxWidth()
           .border(0.8.dp, cardBorder, RoundedCornerShape(18.dp))
       ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Text("Article Reader Font Size", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2535,6 +2512,70 @@ private fun DisplayViewportSubScreen(
                   )
                 }
               }
+            }
+          }
+
+          Divider(color = cardBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+          Text("Reader Font Family", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            listOf("SANS-SERIF" to false, "CYBER MONO" to true).forEach { (label, isCyber) ->
+              val isSelected = settings.readerCyberFont == isCyber
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .clickable { settingsRepo.updateReaderCyberFont(isCyber) },
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) {
+                  if (isLight) Color(0xFFEFF6FF) else Color(0xFF0C213B)
+                } else {
+                  if (isLight) Color(0xFFF1F5F9) else Color(0xFF1E293B)
+                },
+                border = BorderStroke(1.dp, if (isSelected) cyanTint else Color.Transparent)
+              ) {
+                Box(modifier = Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                  Text(
+                    text = label,
+                    color = if (isSelected) cyanTint else textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                }
+              }
+            }
+          }
+
+          // Live Preview Box
+          val previewSp = when (settings.readerFontSize) {
+            0 -> 14.sp
+            2 -> 21.sp
+            else -> 17.sp
+          }
+          val previewFamily = if (settings.readerCyberFont) FontFamily.Monospace else FontFamily.SansSerif
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = if (settings.pureBlackOled) Color(0xFF000000) else if (isLight) Color(0xFFF8FAFC) else Color(0xFF0B0F17),
+            border = BorderStroke(0.6.dp, cardBorder)
+          ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(
+                text = "READER PREVIEW",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = cyanTint,
+                fontFamily = FontFamily.Monospace
+              )
+              Text(
+                text = "Clean, clutter-free text rendering eliminates trackers, scripts, and popups while preserving reading flow.",
+                fontSize = previewSp,
+                fontFamily = previewFamily,
+                color = textPrimary,
+                lineHeight = previewSp * 1.4f
+              )
             }
           }
         }

@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Home
@@ -290,7 +291,7 @@ fun BrowserScreen(
   val homeRequestedByTab = remember { mutableStateMapOf<String, Boolean>() }
   val backToHomePendingByTab = remember { mutableStateMapOf<String, Boolean>() }
   val activeTabIsBlank = activeTab.url.isBlank() || activeTab.url == "about:blank" || activeTab.url == "remmi://newtab" || activeTab.url == "about:home"
-  val isNewTab = activeTabIsBlank && homeRequestedByTab[activeTab.id] != false
+  val isNewTab = activeTabIsBlank && (homeRequestedByTab[activeTab.id] != false || !activeTab.isLoading)
 
   SideEffect {
     tabManager.recordRecomposition(activeTab.id)
@@ -601,6 +602,17 @@ fun BrowserScreen(
     }
   }
 
+  val handleToggleDesktopMode: () -> Unit = {
+    val newDesktop = !activeTab.isDesktopMode
+    tabManager.toggleDesktopMode(activeTab.id)
+    scope.launch {
+      geckoEngine.updateTabSettings(activeTab.id, newDesktop, activeTab.profile, activeTab.securityLevel)
+      if (!isNewTab && activeTab.url.isNotBlank() && !geckoEngine.isInternalOrIgnoredUrl(activeTab.url)) {
+        geckoEngine.reload(activeTab.id)
+      }
+    }
+  }
+
   val handleOpenGhostTab: (String?) -> Unit = { url ->
     val targetDestination = if (!url.isNullOrBlank() && url != "about:blank") url else "about:blank"
     val isBlank = targetDestination == "about:blank"
@@ -825,7 +837,7 @@ fun BrowserScreen(
                       readerArticle = null
                     )
                   }
-                  geckoEngine.loadUrl(activeTab.id, "about:blank")
+                  geckoEngine.resetToNewTab(activeTab.id)
                 },
                 onReload = {
                   tabManager.updateTab(activeTab.id) { it.copy(isLoading = true, progress = 15) }
@@ -916,6 +928,7 @@ fun BrowserScreen(
                 onSelectSearchEngine = { engine ->
                   settingsRepo.updateSearchEngine(engine.displayName)
                 },
+                currentTheme = settings.cyberTheme,
                 onSelectTheme = { theme ->
                   settingsRepo.updateCyberTheme(theme)
                 },
@@ -950,7 +963,7 @@ fun BrowserScreen(
                 onOpenDownloads = { showDownloadsSheet = true },
                 onOpenReadingList = { showReadingListScreen = true },
                 onOpenSettings = onOpenSettings,
-                onToggleDesktop = { tabManager.toggleDesktopMode(activeTab.id) },
+                onToggleDesktop = handleToggleDesktopMode,
                 onToggleGhost = handleToggleGhostMode,
                 onToggleReader = { tabManager.toggleReaderMode(activeTab.id) },
                 onInspectCircuit = { showCircuitSheet = true },
@@ -986,6 +999,7 @@ fun BrowserScreen(
                           // This blank is an explicit home/back-to-home transition.
                           homeRequestedByTab[tabId] = true
                           backToHomePendingByTab.remove(tabId)
+                          geckoEngine.resetToNewTab(tabId)
                         } else {
                           // First real navigation permanently keeps the Gecko surface mounted for
                           // transient blank callbacks during this tab's browsing lifetime.
@@ -994,10 +1008,14 @@ fun BrowserScreen(
                         }
 
                         tabManager.updateTab(tabId) { tab ->
-                          if (tab.url != newUrl) {
+                          if (tab.url != newUrl || isBlank) {
                             tab.copy(
                               url = newUrl,
                               title = if (isBlank) "New Tab" else tab.title,
+                              canGoBack = if (isBlank) false else tab.canGoBack,
+                              canGoForward = if (isBlank) false else tab.canGoForward,
+                              isLoading = if (isBlank) false else tab.isLoading,
+                              progress = if (isBlank) 0 else tab.progress,
                               isSecure = if (isBlank) true else tab.isSecure,
                               isReaderMode = false,
                               readerArticle = null
@@ -1334,18 +1352,39 @@ fun BrowserScreen(
           totalMatches = findTotalMatches,
           onQueryChange = { q ->
             findQuery = q
-            geckoEngine.findInPage(activeTab.id, q)
+            if (q.isBlank()) {
+              findCurrentMatch = 0
+              findTotalMatches = 0
+              geckoEngine.clearFindInPage(activeTab.id)
+            } else {
+              geckoEngine.findInPage(activeTab.id, q, backwards = false) { cur, tot ->
+                findCurrentMatch = cur
+                findTotalMatches = tot
+              }
+            }
           },
           onFindNext = {
-            geckoEngine.findInPage(activeTab.id, findQuery, backwards = false)
+            if (findQuery.isNotBlank()) {
+              geckoEngine.findInPage(activeTab.id, findQuery, backwards = false) { cur, tot ->
+                findCurrentMatch = cur
+                findTotalMatches = tot
+              }
+            }
           },
           onFindPrevious = {
-            geckoEngine.findInPage(activeTab.id, findQuery, backwards = true)
+            if (findQuery.isNotBlank()) {
+              geckoEngine.findInPage(activeTab.id, findQuery, backwards = true) { cur, tot ->
+                findCurrentMatch = cur
+                findTotalMatches = tot
+              }
+            }
           },
           onClose = {
             geckoEngine.clearFindInPage(activeTab.id)
             isFindInPageActive = false
             findQuery = ""
+            findCurrentMatch = 0
+            findTotalMatches = 0
           },
         )
       }
@@ -1457,6 +1496,9 @@ fun BrowserScreen(
               if (activeTab.canGoBack || geckoEngine.canGoBack(activeTab.id)) {
                 Log.i("BrowserScreen", "[FORENSIC] NAV_BACK_TOOLBAR tabId=${activeTab.id} action=GO_BACK")
                 backToHomePendingByTab[activeTab.id] = activeTab.url.isNotBlank() && activeTab.url != "about:blank" && activeTab.url != "remmi://newtab" && activeTab.url != "about:home"
+                if (activeTab.inTabNavigationCount > 0) {
+                  tabManager.updateTab(activeTab.id) { it.copy(inTabNavigationCount = (it.inTabNavigationCount - 1).coerceAtLeast(0)) }
+                }
                 geckoEngine.goBack(activeTab.id)
               } else if (!isNewTab) {
                 Log.i("BrowserScreen", "[FORENSIC] NAV_BACK_TOOLBAR tabId=${activeTab.id} action=RESET_TO_NEW_TAB")
@@ -1525,7 +1567,7 @@ fun BrowserScreen(
                   readerArticle = null
                 )
               }
-              geckoEngine.loadUrl(activeTab.id, "about:blank")
+              geckoEngine.resetToNewTab(activeTab.id)
             },
             modifier = Modifier
               .size(44.dp)
@@ -1710,7 +1752,55 @@ fun BrowserScreen(
                 modifier = Modifier.testTag("menu_desktop_site"),
                 onClick = {
                   showMenuDropdown = false
-                  tabManager.toggleDesktopMode(activeTab.id)
+                  handleToggleDesktopMode()
+                }
+              )
+
+              // Site Dark Mode Toggle (Quick Toggle)
+              val isSiteDark = com.remmi.browser.engine.GeckoDarkModeHelper.isSiteDarkModeEnabled(activeTab.url, settings.darkThemeForAllWebPages)
+              DropdownMenuItem(
+                text = {
+                  Text(
+                    "Dark Mode",
+                    color = if (isSiteDark) ThemeCyber.colors.primary else ThemeCyber.colors.textPrimary,
+                    fontFamily = ThemeCyber.fontFamily,
+                    fontSize = 13.5.sp,
+                    fontWeight = if (isSiteDark) FontWeight.SemiBold else FontWeight.Normal,
+                  )
+                },
+                leadingIcon = {
+                  Icon(
+                    imageVector = Icons.Default.DarkMode,
+                    contentDescription = null,
+                    tint = if (isSiteDark) ThemeCyber.colors.primary else ThemeCyber.colors.textSecondary,
+                    modifier = Modifier.size(18.dp)
+                  )
+                },
+                trailingIcon = {
+                  Checkbox(
+                    checked = isSiteDark,
+                    onCheckedChange = null,
+                    colors = CheckboxDefaults.colors(
+                      checkedColor = ThemeCyber.colors.primary,
+                      checkmarkColor = ThemeCyber.colors.background,
+                      uncheckedColor = ThemeCyber.colors.textSecondary.copy(alpha = 0.6f)
+                    ),
+                    modifier = Modifier.size(20.dp)
+                  )
+                },
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                modifier = Modifier.testTag("menu_dark_mode_toggle"),
+                onClick = {
+                  showMenuDropdown = false
+                  com.remmi.browser.engine.GeckoDarkModeHelper.toggleSiteDarkMode(
+                    context,
+                    activeTab.url,
+                    settings.darkThemeForAllWebPages
+                  )
+                  val sess = geckoEngine.getSession(activeTab.id)
+                  if (sess != null) {
+                    com.remmi.browser.engine.GeckoDarkModeHelper.applySmartDarkToSession(sess, activeTab.url, context)
+                  }
                 }
               )
 
@@ -1817,6 +1907,9 @@ fun BrowserScreen(
                 onClick = {
                   showMenuDropdown = false
                   isFindInPageActive = true
+                  findQuery = ""
+                  findCurrentMatch = 0
+                  findTotalMatches = 0
                 }
               )
 

@@ -233,6 +233,15 @@
         if (sendResponse) sendResponse({ filled: true });
         return true;
       }
+      if (message.type === "REMMI_GET_PAGE_HTML") {
+        try {
+          const docHtml = document.documentElement ? document.documentElement.outerHTML : "";
+          if (sendResponse) sendResponse({ html: docHtml, url: window.location.href, title: document.title });
+        } catch (_e) {
+          if (sendResponse) sendResponse({ html: "", url: window.location.href, title: document.title });
+        }
+        return true;
+      }
     });
   }
 })();

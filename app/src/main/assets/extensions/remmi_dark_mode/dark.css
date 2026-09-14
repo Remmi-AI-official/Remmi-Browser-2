@@ -1,0 +1,24 @@
+/* Remmi Smart Dark Mode Inversion Engine */
+html.remmi-smart-dark {
+  background-color: #121212 !important;
+  filter: invert(90%) hue-rotate(180deg) !important;
+}
+
+/* Preserve original colors for images, videos, canvas, svg, and embedded media */
+html.remmi-smart-dark img,
+html.remmi-smart-dark video,
+html.remmi-smart-dark canvas,
+html.remmi-smart-dark svg,
+html.remmi-smart-dark iframe,
+html.remmi-smart-dark embed,
+html.remmi-smart-dark object,
+html.remmi-smart-dark [style*="background-image"]:not([style*="background-image: none"]) {
+  filter: invert(100%) hue-rotate(180deg) !important;
+}
+
+/* Prevent double inversion on fullscreen media containers */
+html.remmi-smart-dark :fullscreen,
+html.remmi-smart-dark :-webkit-full-screen,
+html.remmi-smart-dark :fullscreen * {
+  filter: none !important;
+}

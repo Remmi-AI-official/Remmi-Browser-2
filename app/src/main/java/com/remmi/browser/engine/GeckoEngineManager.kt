@@ -242,6 +242,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     assertMainThread("getOrCreateGeckoView id=$tabId")
     val existing = geckoViewPool[tabId]
     if (existing != null) {
+      GeckoDarkModeHelper.prepareViewForNavigation(existing, context)
       return existing
     }
     val newView = GeckoView(context).apply {
@@ -254,6 +255,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       isNestedScrollingEnabled = false
       setDynamicToolbarMaxHeight(0)
       tag = tabId
+      setBackgroundColor(GeckoDarkModeHelper.getCanvasBackgroundColor(context))
     }
     geckoViewPool[tabId] = newView
     return newView
@@ -1343,6 +1345,12 @@ class GeckoEngineManager private constructor(private val context: Context) {
     runtime = rt
     _initState.value = GeckoInitState.READY
     GeckoPreferenceController.resetCache(rt)
+    try {
+      val initialSettings = com.remmi.browser.storage.SettingsRepository.getInstance(context).settings.value
+      if (initialSettings.darkThemeForAllWebPages || initialSettings.pureBlackOled) {
+        rt.settings.preferredColorScheme = GeckoRuntimeSettings.COLOR_SCHEME_DARK
+      }
+    } catch (_: Exception) {}
 
     val createDuration = android.os.SystemClock.elapsedRealtime() - startTime
     val createLog = "[GECKO_RUNTIME_CREATED] GeckoRuntime.create() completed successfully in ${createDuration}ms. runtimeReady=true"
@@ -1420,6 +1428,12 @@ class GeckoEngineManager private constructor(private val context: Context) {
       Log.w(TAG, "WebExtension installation skipped: ${t.message}")
       blockExtension.setExtensionFailed(t.message ?: "Skipped")
       com.remmi.browser.util.DebugLogManager.log("[WEBEXT] Installation exception: ${t.message}")
+    }
+
+    try {
+      GeckoDarkModeHelper.init(context, rt)
+    } catch (dmEx: Throwable) {
+      Log.w(TAG, "GeckoDarkModeHelper init notice: ${dmEx.message}")
     }
 
     applyPrivacyProfile(currentProfile)
@@ -2013,10 +2027,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
                                  activeDispatched.isBlank() ||
                                  activeDispatched == "remmi://newtab" ||
                                  activeDispatched == "about:home"
-        val isNavigatingRealUrl = inFlightNavigations.containsKey(tabId) || 
-                                  presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS ||
-                                  (navLoadingStates[tabId] == true && !isIntentionalBlank) ||
-                                  (!activeDispatched.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatched))
+        val inFlightTarget = inFlightUrls[tabId]
+        val isNavigatingRealUrl = (inFlightTarget != null && inFlightTarget != "history_back" && inFlightTarget != "history_forward" && !isInternalOrIgnoredUrl(inFlightTarget)) || 
+                                  presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS
 
         val prevObserved = lastObservedUrls[tabId]
         val prevDispatched = lastDispatchedUrls[tabId]
@@ -2059,6 +2072,23 @@ class GeckoEngineManager private constructor(private val context: Context) {
           logRecoveryUrlState(tabId, activeNavId, genBefore, url, true, activeRecovery?.targetUrl, "NORMAL", "PROCESS_NORMAL")
         } else {
           if (url == "about:blank") {
+            val inFlightUrl = inFlightUrls[tabId]
+            val isBackNavigation = inFlightUrl == "history_back"
+            if (isBackNavigation) {
+              val backMsg = "[FORENSIC] history_back reached about:blank -> transitioning tabId=$tabId to New Tab"
+              Log.i(TAG, backMsg)
+              com.remmi.browser.util.DebugLogManager.log(backMsg)
+              inFlightNavigations.remove(tabId)
+              inFlightUrls.remove(tabId)
+              lastDispatchedUrls[tabId] = "about:blank"
+              lastObservedUrls[tabId] = "about:blank"
+              sessionNavStates[tabId] = Pair(false, sessionNavStates[tabId]?.second ?: false)
+              sessionCallbacks[tabId]?.onNavStateChange(false, sessionNavStates[tabId]?.second ?: false)
+              sessionCallbacks[tabId]?.onUrlChange("about:blank")
+              resetToNewTab(tabId)
+              return
+            }
+
             if (!isIntentionalBlank && navLoadingStates[tabId] == true) {
               checkPostNavFailure(tabId, "ABOUT_BLANK", "about:blank")
             }
@@ -2181,10 +2211,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
                                        activeDispatchedUrl.isBlank() ||
                                        activeDispatchedUrl == "remmi://newtab" ||
                                        activeDispatchedUrl == "about:home"
-              val isNavigatingRealUrl = inFlightNavigations.containsKey(tabId) || 
-                                        presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS ||
-                                        (navLoadingStates[tabId] == true && !isIntentionalBlank) ||
-                                        (!activeDispatchedUrl.isNullOrBlank() && !isInternalOrIgnoredUrl(activeDispatchedUrl))
+              val inFlightTarget = inFlightUrls[tabId]
+              val isNavigatingRealUrl = (inFlightTarget != null && inFlightTarget != "history_back" && inFlightTarget != "history_forward" && !isInternalOrIgnoredUrl(inFlightTarget)) || 
+                                        presentationStates[tabId] == PresentationState.REAL_NAVIGATION_IN_PROGRESS
 
               if (!isIntentionalBlank && isNavigatingRealUrl) {
                 val transMsg = "[FORENSIC][NAV_TRANSIENT_BLANK] tabId=$tabId navId=${getActiveNavId(tabId)} generation=${getNavGeneration(tabId)} action=KEEP_EXISTING_SURFACE targetUrl=$activeDispatchedUrl"
@@ -2291,6 +2320,12 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
         logContentProcessEvent(event = "READY", tabId = tabId, session = session, url = url, reason = "PAGE_START")
         getMemoryForensicSnapshot("NAV_START")
+
+        val gv = attachedViews[tabId] ?: geckoViewPool[tabId]
+        GeckoDarkModeHelper.prepareViewForNavigation(gv, context)
+        if (!isInternalOrIgnoredUrl(url)) {
+          GeckoDarkModeHelper.applySmartDarkToSession(session, url, context)
+        }
 
         val activeRecovery = activeRecoveries[tabId]
         if (activeRecovery != null && 
@@ -2430,12 +2465,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
         if (!success) {
           checkPostNavFailure(tabId, "PAGE_STOP_FAILED", currUrl)
         } else {
-          val currentSettings = com.remmi.browser.storage.SettingsRepository.getInstance(context).settings.value
-          if (currentSettings.darkThemeForAllWebPages && !isInternalOrIgnoredUrl(currUrl)) {
-            val forceDarkJs = "javascript:(function(){try{if(document.getElementById('__remmi_dark_mode_style'))return;var s=document.createElement('style');s.id='__remmi_dark_mode_style';s.textContent=':root,html{color-scheme:dark!important;}@media(prefers-color-scheme:light),(prefers-color-scheme:no-preference){html,body{background-color:#121212!important;color:#e0e0e0!important;}}';(document.head||document.documentElement).appendChild(s);}catch(e){}})();"
-            try {
-              session.loadUri(forceDarkJs)
-            } catch (_: Exception) {}
+          if (!isInternalOrIgnoredUrl(currUrl)) {
+            GeckoDarkModeHelper.applySmartDarkToSession(session, currUrl, context)
           }
         }
 
@@ -2740,6 +2771,22 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
   // --- View Attachment & Lifecycle Control ---
 
+  fun shouldReplaceHistoryForFirstLoad(tabId: String): Boolean {
+    val dispatched = dispatchedNavigationsHistory[tabId]
+    val lastObserved = lastObservedUrls[tabId]
+    val lastDispatched = lastDispatchedUrls[tabId]
+    val tab = TabManager.getInstance().getTab(tabId)
+    val tabUrl = tab?.url
+    val isBlankOrHome = { u: String? ->
+      u.isNullOrBlank() || u == "about:blank" || u == "remmi://newtab" || u == "about:home"
+    }
+
+    val isBlankState = isBlankOrHome(lastObserved) || isBlankOrHome(lastDispatched) || isBlankOrHome(tabUrl)
+    val fewNavigations = dispatched.isNullOrEmpty() || dispatched.size <= 1
+
+    return isBlankState || fewNavigations
+  }
+
   private fun dispatchPendingNavigationIfReady(tabId: String) {
     assertMainThread("DISPATCH_PENDING id=$tabId")
     val pending = pendingNavigations.remove(tabId) ?: return
@@ -2786,7 +2833,11 @@ class GeckoEngineManager private constructor(private val context: Context) {
       if (testLoader != null) {
         testLoader(tabId, session, pending.url)
       } else {
-        session.loadUri(pending.url)
+        if (shouldReplaceHistoryForFirstLoad(tabId)) {
+          session.load(GeckoSession.Loader().uri(pending.url).flags(GeckoSession.LOAD_FLAGS_REPLACE_HISTORY))
+        } else {
+          session.loadUri(pending.url)
+        }
       }
     } catch (e: Exception) {
       Log.w(TAG, "[GECKO] dispatchPendingNavigation error on tabId=$tabId: ${e.message}")
@@ -3368,6 +3419,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
       return
     }
     assertMainThread("LOAD_URL id=$tabId")
+
+    val targetGv = attachedViews[tabId] ?: geckoViewPool[tabId]
+    GeckoDarkModeHelper.prepareViewForNavigation(targetGv, context)
     
     val bridge = com.remmi.adblock.AdblockBridge.getInstance()
     val rulesCount = bridge.getLoadedRulesCount()
@@ -3487,6 +3541,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val currentSessId = "0x" + Integer.toHexString(System.identityHashCode(currentSession))
     val currentViewId = attachedViews[tabId]?.let { "0x" + Integer.toHexString(System.identityHashCode(it)) } ?: "none"
 
+    val shouldReplace = shouldReplaceHistoryForFirstLoad(tabId)
     lastDispatchedUrls[tabId] = targetUrl
     inFlightUrls[tabId] = targetUrl
     lastDispatchedTimes[tabId] = now
@@ -3518,7 +3573,11 @@ class GeckoEngineManager private constructor(private val context: Context) {
       if (testLoader != null) {
         testLoader(tabId, currentSession, targetUrl)
       } else {
-        currentSession.loadUri(targetUrl)
+        if (shouldReplace && targetUrl != "about:blank") {
+          currentSession.load(GeckoSession.Loader().uri(targetUrl).flags(GeckoSession.LOAD_FLAGS_REPLACE_HISTORY))
+        } else {
+          currentSession.loadUri(targetUrl)
+        }
       }
     } catch (e: Exception) {
       Log.w(TAG, "[GECKO] loadUrl error on tabId=$tabId: ${e.message}")
@@ -3569,6 +3628,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
       lastObservedUrls[tabId] = "about:blank"
       inFlightNavigations.remove(tabId)
       inFlightUrls.remove(tabId)
+      dispatchedNavigationsHistory.remove(tabId)
+      sessionNavStates[tabId] = Pair(false, false)
+      sessionCallbacks[tabId]?.onNavStateChange(false, false)
       val pendingRec = pendingContentRecoveries.remove(tabId)
       if (pendingRec != null) {
         transitionRecoveryState(tabId, RecoveryState.SUPERSEDED, pendingRec.navId, pendingRec.generation, "superseded_by_reset_to_new_tab")
@@ -3628,10 +3690,50 @@ class GeckoEngineManager private constructor(private val context: Context) {
     return sessionNavStates[tabId] ?: Pair(false, false)
   }
 
-  fun findInPage(tabId: String, query: String, backwards: Boolean = false) {
+  fun updateDarkThemeSettings(darkTheme: Boolean) {
+    mainHandler.post {
+      try {
+        GeckoDarkModeHelper.setPreferredColorScheme(runtime, darkTheme)
+        val canvasBg = GeckoDarkModeHelper.getCanvasBackgroundColor(context)
+        attachedViews.values.forEach { view ->
+          view.setBackgroundColor(canvasBg)
+        }
+        geckoViewPool.values.forEach { view ->
+          view.setBackgroundColor(canvasBg)
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to update preferredColorScheme: ${e.message}")
+      }
+    }
+  }
+
+  fun findInPage(
+    tabId: String,
+    query: String,
+    backwards: Boolean = false,
+    onResult: ((current: Int, total: Int) -> Unit)? = null
+  ) {
     onMainSession(tabId, "FIND_IN_PAGE") { session ->
-      val flags = if (backwards) GeckoSession.FINDER_FIND_BACKWARDS else 0
-      session.finder.find(query, flags)
+      if (query.isBlank()) {
+        session.finder.clear()
+        mainHandler.post { onResult?.invoke(0, 0) }
+        return@onMainSession
+      }
+      val directionFlag = if (backwards) GeckoSession.FINDER_FIND_BACKWARDS else GeckoSession.FINDER_FIND_FORWARD
+      val flags = directionFlag or GeckoSession.FINDER_DISPLAY_HIGHLIGHT_ALL
+      session.finder.find(query, flags).then({ result ->
+        mainHandler.post {
+          val current = result?.current ?: 0
+          val total = result?.total ?: 0
+          onResult?.invoke(current, total)
+        }
+        GeckoResult.fromValue(result)
+      }, {
+        mainHandler.post {
+          onResult?.invoke(0, 0)
+        }
+        GeckoResult.fromValue(null)
+      })
     }
   }
 

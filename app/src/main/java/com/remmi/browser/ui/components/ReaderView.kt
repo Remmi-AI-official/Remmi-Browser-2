@@ -151,7 +151,7 @@ fun ReaderView(
   val scrollState = rememberScrollState()
 
   // State
-  var fontSizeIndex by remember { mutableIntStateOf(initialFontSizeIndex) } // 0=14sp, 1=17sp, 2=21sp, 3=25sp
+  var fontSizeIndex by remember(initialFontSizeIndex) { mutableIntStateOf(initialFontSizeIndex) } // 0=14sp, 1=17sp, 2=21sp, 3=25sp
   val isLight = ThemeCyber.colors.isLight
   val initialReaderTheme = if (isLight) ReaderThemePreset.CLEAN_LIGHT else ReaderThemePreset.CYBER_DARK
   var readerTheme by remember(isLight) { mutableStateOf(initialReaderTheme) }
@@ -176,7 +176,7 @@ fun ReaderView(
 
   LaunchedEffect(article) {
     if (article == null) {
-      kotlinx.coroutines.delay(6000L)
+      kotlinx.coroutines.delay(15000L)
       extractionTimedOut = true
     } else {
       extractionTimedOut = false

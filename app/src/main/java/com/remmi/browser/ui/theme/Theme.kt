@@ -21,28 +21,24 @@ fun RemmiTheme(
   content: @Composable () -> Unit,
 ) {
   val systemIsDark = isSystemInDarkTheme()
-  val effectiveIsDark = when (appearanceMode) {
+  val effectiveIsDark = if (pureBlackOled) true else when (appearanceMode) {
     AppearanceMode.SYSTEM -> systemIsDark
     AppearanceMode.LIGHT -> false
     AppearanceMode.DARK -> true
   }
 
-  // If Cyberpunk HUD is disabled (default), always use clean normal default theme
-  val effectiveTheme = when {
-    !cyberHudEnabled -> if (effectiveIsDark) CyberTheme.MINIMAL_DARK else CyberTheme.NORMAL_DEFAULT
-    !effectiveIsDark && !cyberTheme.isLight -> CyberTheme.NORMAL_DEFAULT
-    effectiveIsDark && cyberTheme.isLight -> CyberTheme.MINIMAL_DARK
-    else -> cyberTheme
-  }
+  // Unified Single Source of Truth:
+  // cyberTheme directly specifies the active visual and accent palette.
+  val effectiveTheme = cyberTheme
 
-  val isLight = effectiveTheme.isLight
+  val isLight = if (pureBlackOled) false else effectiveTheme.isLight
   val isNormal = effectiveTheme.isNormalTheme
 
-  val bg = if (isLight) Color(0xFFF8F9FA) else if (pureBlackOled) Color(0xFF000000) else Color(0xFF0A0A0F)
-  val bgDarker = if (isLight) Color(0xFFFFFFFF) else if (pureBlackOled) Color(0xFF000000) else Color(0xFF050508)
-  val surface = if (isLight) Color(0xFFFFFFFF) else if (pureBlackOled) Color(0xFF0D0D12) else Color(0xFF12121A)
-  val surfaceLight = if (isLight) Color(0xFFF1F3F4) else if (pureBlackOled) Color(0xFF161622) else Color(0xFF1A1A28)
-  val surfaceBorder = if (isLight) Color(0xFFDADCE0) else if (pureBlackOled) Color(0xFF222234) else Color(0xFF26263A)
+  val bg = if (pureBlackOled) Color(0xFF000000) else if (isLight) Color(0xFFF8F9FA) else Color(0xFF0A0A0F)
+  val bgDarker = if (pureBlackOled) Color(0xFF000000) else if (isLight) Color(0xFFFFFFFF) else Color(0xFF050508)
+  val surface = if (pureBlackOled) Color(0xFF000000) else if (isLight) Color(0xFFFFFFFF) else Color(0xFF12121A)
+  val surfaceLight = if (pureBlackOled) Color(0xFF111111) else if (isLight) Color(0xFFF1F3F4) else Color(0xFF1A1A28)
+  val surfaceBorder = if (pureBlackOled) Color(0xFF222222) else if (isLight) Color(0xFFDADCE0) else Color(0xFF26263A)
 
   val activeFontFamily = browserFont.fontFamily
 

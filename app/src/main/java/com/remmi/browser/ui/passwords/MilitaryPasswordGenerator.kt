@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -375,7 +376,8 @@ fun MilitaryPasswordGeneratorDialog(
 
         // Action Buttons
         Row(
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier.fillMaxWidth()
         ) {
           OutlinedButton(
@@ -385,21 +387,24 @@ fun MilitaryPasswordGeneratorDialog(
             },
             border = BorderStroke(1.dp, ThemeCyber.colors.primary),
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.weight(if (onUsePassword != null) 0.8f else 1f)
           ) {
             Icon(
               imageVector = Icons.Default.ContentCopy,
               contentDescription = null,
               tint = ThemeCyber.colors.primary,
-              modifier = Modifier.size(18.dp)
+              modifier = Modifier.size(16.dp)
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
               text = "Copy",
               color = ThemeCyber.colors.primary,
               fontWeight = FontWeight.Bold,
-              fontSize = 13.sp,
-              fontFamily = ThemeCyber.fontFamily
+              fontSize = 12.sp,
+              fontFamily = ThemeCyber.fontFamily,
+              maxLines = 1,
+              softWrap = false
             )
           }
 
@@ -411,21 +416,24 @@ fun MilitaryPasswordGeneratorDialog(
               },
               colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.primary),
               shape = RoundedCornerShape(12.dp),
-              modifier = Modifier.weight(1f)
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+              modifier = Modifier.weight(1.2f)
             ) {
               Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = null,
                 tint = Color.Black,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
               )
-              Spacer(modifier = Modifier.width(6.dp))
+              Spacer(modifier = Modifier.width(4.dp))
               Text(
                 text = "Use Password",
                 color = Color.Black,
                 fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                fontFamily = ThemeCyber.fontFamily
+                fontSize = 12.sp,
+                fontFamily = ThemeCyber.fontFamily,
+                maxLines = 1,
+                softWrap = false
               )
             }
           }

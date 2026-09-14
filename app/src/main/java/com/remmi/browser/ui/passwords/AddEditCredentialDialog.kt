@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -291,7 +292,8 @@ fun AddEditCredentialDialog(
 
         // Action Buttons
         Row(
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier.fillMaxWidth()
         ) {
           if (initialEntry != null && onDelete != null) {
@@ -302,11 +304,25 @@ fun AddEditCredentialDialog(
               },
               border = BorderStroke(1.dp, ThemeCyber.colors.dangerRed),
               shape = RoundedCornerShape(12.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
               modifier = Modifier.weight(1f)
             ) {
-              Icon(Icons.Default.Delete, contentDescription = null, tint = ThemeCyber.colors.dangerRed, modifier = Modifier.size(16.dp))
+              Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = null,
+                tint = ThemeCyber.colors.dangerRed,
+                modifier = Modifier.size(16.dp)
+              )
               Spacer(modifier = Modifier.width(4.dp))
-              Text("Delete", color = ThemeCyber.colors.dangerRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = ThemeCyber.fontFamily)
+              Text(
+                text = "Delete",
+                color = ThemeCyber.colors.dangerRed,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = ThemeCyber.fontFamily,
+                maxLines = 1,
+                softWrap = false
+              )
             }
           }
 
@@ -326,16 +342,19 @@ fun AddEditCredentialDialog(
             enabled = url.isNotBlank() && password.isNotBlank(),
             colors = ButtonDefaults.buttonColors(containerColor = ThemeCyber.colors.primary),
             shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
             modifier = Modifier
-              .weight(1.5f)
+              .weight(1f)
               .testTag("btn_save_credential")
           ) {
             Text(
               text = if (initialEntry == null) "Save to Folder" else "Update",
               color = Color.Black,
               fontWeight = FontWeight.Bold,
-              fontSize = 13.5.sp,
-              fontFamily = ThemeCyber.fontFamily
+              fontSize = 12.5.sp,
+              fontFamily = ThemeCyber.fontFamily,
+              maxLines = 1,
+              softWrap = false
             )
           }
         }

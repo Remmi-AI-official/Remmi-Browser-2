@@ -282,8 +282,14 @@ fun BrowserView(
   }
 
   // Synchronize tab settings with the underlying GeckoSession
+  var lastDesktopMode by remember { mutableStateOf(tab.isDesktopMode) }
   LaunchedEffect(tab.id, tab.profile, tab.isDesktopMode, tab.securityLevel, tab.containerType) {
+    val desktopChanged = lastDesktopMode != tab.isDesktopMode
+    lastDesktopMode = tab.isDesktopMode
     geckoEngine.updateTabSettings(tab.id, tab.isDesktopMode, tab.profile, tab.securityLevel)
+    if (desktopChanged && tab.url.isNotBlank() && !geckoEngine.isInternalOrIgnoredUrl(tab.url)) {
+      geckoEngine.reload(tab.id)
+    }
   }
 
   // Handle URL navigation safely through GeckoEngineManager without feedback loops
@@ -377,14 +383,14 @@ fun BrowserView(
     }
   }
 
-  val surfaceColor = if (ThemeCyber.colors.isLight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#121824")
+  val surfaceColor = com.remmi.browser.engine.GeckoDarkModeHelper.getCanvasBackgroundColor(context)
   val primaryColorInt = android.graphics.Color.argb(
     (ThemeCyber.colors.primary.alpha * 255).toInt(),
     (ThemeCyber.colors.primary.red * 255).toInt(),
     (ThemeCyber.colors.primary.green * 255).toInt(),
     (ThemeCyber.colors.primary.blue * 255).toInt()
   )
-  val progressBgColor = if (ThemeCyber.colors.isLight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#1E2430")
+  val progressBgColor = if (surfaceColor == com.remmi.browser.engine.GeckoDarkModeHelper.COLOR_LIGHT) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#1E2430")
   val isRealWebPage = !tab.isReaderMode && tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
 
   Box(

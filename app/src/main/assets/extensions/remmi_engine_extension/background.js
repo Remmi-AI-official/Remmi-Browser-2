@@ -285,26 +285,60 @@ function connectNative() {
         const requestId = msg.requestId;
         const rawTabId = msg.tabId;
         const numTabId = (typeof rawTabId === "number") ? rawTabId : (parseInt(rawTabId, 10) || null);
-        const extract = (targetId) => {
+        
+        const sendHtmlResult = (html, pageUrl) => {
+          let cleanHtml = html || "";
+          const MAX_HTML_BYTES = 2 * 1024 * 1024;
+          if (cleanHtml.length > MAX_HTML_BYTES) {
+            cleanHtml = cleanHtml.substring(0, MAX_HTML_BYTES) + "<!-- Truncated by Remmi Native Bridge -->";
+          }
+          if (port) {
+            try {
+              port.postMessage({ type: "EXTRACTED_HTML", html: cleanHtml, url: pageUrl || "", requestId: requestId, tabId: rawTabId });
+            } catch (_ex) {}
+          }
+        };
+
+        const trySendMessage = () => {
+          return browser.tabs.query({ active: true }).then(tabs => {
+            const targetTab = (tabs && tabs[0]) ? tabs[0] : null;
+            if (targetTab) {
+              return browser.tabs.sendMessage(targetTab.id, { type: "REMMI_GET_PAGE_HTML" });
+            }
+            return browser.tabs.query({}).then(allTabs => {
+              if (allTabs && allTabs[0]) {
+                return browser.tabs.sendMessage(allTabs[0].id, { type: "REMMI_GET_PAGE_HTML" });
+              }
+              throw new Error("No tabs");
+            });
+          });
+        };
+
+        const extractWithScript = (targetId) => {
           const params = { code: "document.documentElement.outerHTML;" };
           return (targetId !== null && !isNaN(targetId)) ? browser.tabs.executeScript(targetId, params) : browser.tabs.executeScript(params);
         };
-        extract(numTabId).then((res) => {
-          let html = (res && res[0]) ? res[0] : "";
-          const MAX_HTML_BYTES = 2 * 1024 * 1024;
-          if (new Blob([html]).size > MAX_HTML_BYTES) {
-            html = html.substring(0, MAX_HTML_BYTES) + "<!-- Truncated by Remmi Native Bridge -->";
+
+        trySendMessage().then(res => {
+          if (res && res.html && res.html.length > 50) {
+            sendHtmlResult(res.html, res.url || "");
+          } else {
+            throw new Error("Empty html from message");
           }
-          if (port) port.postMessage({ type: "EXTRACTED_HTML", html: html, url: "", requestId: requestId, tabId: rawTabId });
-        }).catch(_e => {
-          browser.tabs.query({ active: true }).then(tabs => {
-            const activeId = (tabs && tabs[0]) ? tabs[0].id : null;
-            return extract(activeId);
-          }).then(res => {
+        }).catch(_err => {
+          extractWithScript(numTabId).then(res => {
             let html = (res && res[0]) ? res[0] : "";
-            if (port) port.postMessage({ type: "EXTRACTED_HTML", html: html, url: "", requestId: requestId, tabId: rawTabId });
-          }).catch(_err => {
-            if (port) port.postMessage({ type: "EXTRACTED_HTML", html: "", url: "", requestId: requestId, tabId: rawTabId });
+            sendHtmlResult(html, "");
+          }).catch(_e2 => {
+            browser.tabs.query({ active: true }).then(tabs => {
+              const activeId = (tabs && tabs[0]) ? tabs[0].id : null;
+              return extractWithScript(activeId);
+            }).then(res => {
+              let html = (res && res[0]) ? res[0] : "";
+              sendHtmlResult(html, "");
+            }).catch(_e3 => {
+              sendHtmlResult("", "");
+            });
           });
         });
       } else if (msg.type === "EXECUTE_SCRIPT") {

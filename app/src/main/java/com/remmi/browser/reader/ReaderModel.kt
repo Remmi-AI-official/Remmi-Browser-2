@@ -149,6 +149,45 @@ object ReaderExtractor {
       return@withContext null
     }
 
+    // Attempt 1: Fast direct HTTP fetch via OkHttp
+    try {
+      val okHttpClient = if (isGhost || isOnion) {
+        val port = com.remmi.browser.security.CurrentTorRoute.currentSocksPort ?: 9050
+        okhttp3.OkHttpClient.Builder()
+          .proxy(java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", port)))
+          .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+          .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+          .followRedirects(true)
+          .build()
+      } else {
+        okhttp3.OkHttpClient.Builder()
+          .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+          .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+          .followRedirects(true)
+          .build()
+      }
+
+      val req = okhttp3.Request.Builder()
+        .url(url)
+        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .build()
+
+      val resp = okHttpClient.newCall(req).execute()
+      if (resp.isSuccessful) {
+        val html = resp.body?.string().orEmpty()
+        if (html.isNotBlank()) {
+          val parsed = parseHtmlDocument(html, url, currentTitle, domain)
+          if (parsed != null && parsed.activeParagraphs.isNotEmpty()) {
+            return@withContext parsed
+          }
+        }
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "OkHttp reader direct fetch attempt notice: ${e.message}")
+    }
+
+    // Attempt 2: Fallback to GeckoWebExecutor
     val runtime = com.remmi.browser.engine.GeckoEngineManager.getInstance(context).runtime
     if (runtime == null) {
       Log.w(TAG, "Reader extraction failed: Gecko runtime not available")

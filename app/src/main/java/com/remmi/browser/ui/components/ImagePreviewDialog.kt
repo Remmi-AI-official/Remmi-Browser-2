@@ -1,6 +1,7 @@
 package com.remmi.browser.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,8 +25,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,8 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -77,13 +80,14 @@ fun ImagePreviewDialog(
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(Color.Black.copy(alpha = 0.94f))
+        .background(Color(0xFF000000))
     ) {
       // Top Action Bar
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 20.dp)
+          .statusBarsPadding()
+          .padding(horizontal = 16.dp, vertical = 12.dp)
           .align(Alignment.TopCenter),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -94,8 +98,10 @@ fun ImagePreviewDialog(
             fontFamily = ThemeCyber.fontFamily,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
-            color = ThemeCyber.colors.primary
+            color = ThemeCyber.colors.primary,
+            letterSpacing = 0.5.sp
           )
+          Spacer(modifier = Modifier.height(2.dp))
           Text(
             text = title.ifEmpty { resolvedUrl.substringAfterLast('/') },
             fontSize = 13.sp,
@@ -105,46 +111,40 @@ fun ImagePreviewDialog(
           )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          IconButton(
-            onClick = { onOpenInTab(resolvedUrl) },
-            modifier = Modifier
-              .size(36.dp)
-              .clip(CircleShape)
-              .background(Color.White.copy(alpha = 0.15f))
-          ) {
-            Icon(Icons.Default.OpenInNew, contentDescription = "Open in tab", tint = Color.White, modifier = Modifier.size(18.dp))
-          }
+        Spacer(modifier = Modifier.width(12.dp))
 
-          IconButton(
-            onClick = { onDownload(resolvedUrl) },
-            modifier = Modifier
-              .size(36.dp)
-              .clip(CircleShape)
-              .background(Color.White.copy(alpha = 0.15f))
-          ) {
-            Icon(Icons.Default.Download, contentDescription = "Download image", tint = Color.White, modifier = Modifier.size(18.dp))
-          }
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          PreviewActionButton(
+            icon = Icons.Default.OpenInNew,
+            contentDescription = "Open in tab",
+            testTag = "preview_btn_open_tab",
+            onClick = { onOpenInTab(resolvedUrl) }
+          )
 
-          IconButton(
-            onClick = { onShare(resolvedUrl, title) },
-            modifier = Modifier
-              .size(36.dp)
-              .clip(CircleShape)
-              .background(Color.White.copy(alpha = 0.15f))
-          ) {
-            Icon(Icons.Default.Share, contentDescription = "Share image", tint = Color.White, modifier = Modifier.size(18.dp))
-          }
+          PreviewActionButton(
+            icon = Icons.Default.Download,
+            contentDescription = "Download image",
+            testTag = "preview_btn_download",
+            onClick = { onDownload(resolvedUrl) }
+          )
 
-          IconButton(
-            onClick = onDismiss,
-            modifier = Modifier
-              .size(36.dp)
-              .clip(CircleShape)
-              .background(Color.White.copy(alpha = 0.2f))
-          ) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
-          }
+          PreviewActionButton(
+            icon = Icons.Default.Share,
+            contentDescription = "Share image",
+            testTag = "preview_btn_share",
+            onClick = { onShare(resolvedUrl, title) }
+          )
+
+          PreviewActionButton(
+            icon = Icons.Default.Close,
+            contentDescription = "Close",
+            isClose = true,
+            testTag = "preview_btn_close",
+            onClick = onDismiss
+          )
         }
       }
 
@@ -152,7 +152,7 @@ fun ImagePreviewDialog(
       Box(
         modifier = Modifier
           .fillMaxSize()
-          .padding(top = 70.dp, bottom = 40.dp, start = 16.dp, end = 16.dp),
+          .padding(top = 76.dp, bottom = 32.dp, start = 12.dp, end = 12.dp),
         contentAlignment = Alignment.Center
       ) {
         var isLoading by remember { mutableStateOf(true) }
@@ -224,5 +224,34 @@ fun ImagePreviewDialog(
         }
       }
     }
+  }
+}
+
+@Composable
+private fun PreviewActionButton(
+  icon: ImageVector,
+  contentDescription: String,
+  onClick: () -> Unit,
+  isClose: Boolean = false,
+  testTag: String = "",
+) {
+  Box(
+    modifier = Modifier
+      .size(36.dp)
+      .clip(CircleShape)
+      .background(if (isClose) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.12f))
+      .clickable(
+        onClick = onClick,
+        role = Role.Button
+      )
+      .then(if (testTag.isNotBlank()) Modifier.testTag(testTag) else Modifier),
+    contentAlignment = Alignment.Center
+  ) {
+    Icon(
+      imageVector = icon,
+      contentDescription = contentDescription,
+      tint = Color.White,
+      modifier = Modifier.size(if (isClose) 20.dp else 18.dp)
+    )
   }
 }

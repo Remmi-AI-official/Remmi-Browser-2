@@ -182,7 +182,7 @@ data class BrowserSettings(
   val cyberHudEnabled: Boolean = false,
   val browserFont: BrowserFont = BrowserFont.CHROME_SANS,
   val pureBlackOled: Boolean = false,
-  val darkThemeForAllWebPages: Boolean = false,
+  val darkThemeForAllWebPages: Boolean = true,
   val defaultDesktopMode: Boolean = false,
   val httpsOnlyMode: Boolean = true,
   val glitchAnimationEnabled: Boolean = false,
@@ -216,7 +216,7 @@ data class BrowserSettings(
   val preserveIntermediateUrls: Boolean = true,
 )
 
-class SettingsRepository(context: Context) {
+class SettingsRepository(private val context: Context) {
 
   private val prefs: SharedPreferences =
     context.getSharedPreferences("remmi_sec_prefs", Context.MODE_PRIVATE)
@@ -259,7 +259,7 @@ class SettingsRepository(context: Context) {
       cyberHudEnabled = prefs.getBoolean("cyber_hud_enabled", false),
       browserFont = font,
       pureBlackOled = prefs.getBoolean("pure_black_oled", false),
-      darkThemeForAllWebPages = prefs.getBoolean("dark_theme_for_all_webpages", false),
+      darkThemeForAllWebPages = prefs.getBoolean("dark_theme_for_all_webpages", true),
       defaultDesktopMode = prefs.getBoolean("default_desktop_mode", false),
       httpsOnlyMode = prefs.getBoolean("https_only", true),
       glitchAnimationEnabled = prefs.getBoolean("glitch_enabled", false),
@@ -343,27 +343,56 @@ class SettingsRepository(context: Context) {
     }
   }
 
-  fun updateCyberTheme(theme: CyberTheme) {
-    prefs.edit().putString("cyber_theme", theme.id).apply()
-    _settings.value = _settings.value.copy(cyberTheme = theme)
-  }
-
-  fun updateCyberHudEnabled(enabled: Boolean) {
-    prefs.edit().putBoolean("cyber_hud_enabled", enabled).apply()
+  fun syncThemeFromManager(theme: CyberTheme, appearance: AppearanceMode, hud: Boolean) {
     _settings.value = _settings.value.copy(
-      cyberHudEnabled = enabled,
-      cyberTheme = if (!enabled) CyberTheme.NORMAL_DEFAULT else _settings.value.cyberTheme
+      cyberTheme = theme,
+      appearanceMode = appearance,
+      cyberHudEnabled = hud
     )
   }
 
+  fun applyTheme(theme: CyberTheme) {
+    com.remmi.browser.ui.theme.ThemeManager.getInstance(context).applyTheme(theme)
+  }
+
+  fun updateCyberTheme(theme: CyberTheme) {
+    applyTheme(theme)
+  }
+
+  fun updateCyberHudEnabled(enabled: Boolean) {
+    if (enabled) {
+      val current = _settings.value.cyberTheme
+      applyTheme(if (current.isNormalTheme) CyberTheme.JARVIS else current)
+    } else {
+      val isLight = _settings.value.appearanceMode == AppearanceMode.LIGHT
+      applyTheme(if (isLight) CyberTheme.NORMAL_DEFAULT else CyberTheme.MINIMAL_DARK)
+    }
+  }
+
   fun updateAppearanceMode(mode: AppearanceMode) {
-    prefs.edit().putString("appearance_mode", mode.id).apply()
-    _settings.value = _settings.value.copy(appearanceMode = mode)
+    when (mode) {
+      AppearanceMode.LIGHT -> applyTheme(CyberTheme.NORMAL_DEFAULT)
+      AppearanceMode.DARK -> {
+        if (_settings.value.cyberTheme == CyberTheme.NORMAL_DEFAULT) {
+          applyTheme(CyberTheme.MINIMAL_DARK)
+        } else {
+          applyTheme(_settings.value.cyberTheme)
+        }
+      }
+      AppearanceMode.SYSTEM -> {
+        prefs.edit().putString("appearance_mode", mode.id).apply()
+        _settings.value = _settings.value.copy(appearanceMode = mode)
+      }
+    }
   }
 
   fun updateDarkThemeForAllWebPages(enabled: Boolean) {
     prefs.edit().putBoolean("dark_theme_for_all_webpages", enabled).apply()
     _settings.value = _settings.value.copy(darkThemeForAllWebPages = enabled)
+    try {
+      val isDark = com.remmi.browser.engine.GeckoDarkModeHelper.isBrowserInDarkMode(context)
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(context).updateDarkThemeSettings(isDark)
+    } catch (_: Exception) {}
   }
 
   fun updateBrowserFont(font: BrowserFont) {
@@ -373,7 +402,15 @@ class SettingsRepository(context: Context) {
 
   fun updatePureBlackOled(enabled: Boolean) {
     prefs.edit().putBoolean("pure_black_oled", enabled).apply()
-    _settings.value = _settings.value.copy(pureBlackOled = enabled)
+    if (enabled && _settings.value.appearanceMode == AppearanceMode.LIGHT) {
+      prefs.edit().putString("appearance_mode", AppearanceMode.DARK.id).apply()
+      _settings.value = _settings.value.copy(pureBlackOled = true, appearanceMode = AppearanceMode.DARK)
+    } else {
+      _settings.value = _settings.value.copy(pureBlackOled = enabled)
+    }
+    try {
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(context).updateDarkThemeSettings(enabled || _settings.value.darkThemeForAllWebPages)
+    } catch (_: Exception) {}
   }
 
   fun updateDefaultDesktopMode(enabled: Boolean) {
