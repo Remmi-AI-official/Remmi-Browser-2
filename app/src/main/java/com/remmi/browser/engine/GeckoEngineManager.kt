@@ -2250,6 +2250,15 @@ class GeckoEngineManager private constructor(private val context: Context) {
         com.remmi.browser.util.DebugLogManager.log(errLog)
 
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
+        if (targetUrl.startsWith("https://", ignoreCase = true) && com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl)) {
+          val fallbackHttpUrl = "http://" + targetUrl.substring(8)
+          Log.i(TAG, "Onion HTTPS failed (category=${error.category}, code=${error.code}); auto-fallback to HTTP: $fallbackHttpUrl")
+          CoroutineScope(Dispatchers.Main.immediate).launch {
+            loadUrl(tabId, fallbackHttpUrl)
+          }
+          return null
+        }
+
         val errorDataUri = OfflineErrorPageGenerator.toDataUri(
           targetUrl = targetUrl,
           errorCode = "ERR_INTERNET_DISCONNECTED",

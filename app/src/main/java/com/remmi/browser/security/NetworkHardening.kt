@@ -72,6 +72,9 @@ object NetworkHardening {
       "network.lna.blocking" to true,
       "dom.security.https_only_mode" to false, // Allow HTTP connections on .onion (Hidden services use onion-crypto, not traditional TLS)
       "dom.security.https_only_mode_pbm" to false,
+      "dom.security.https_first" to false, // CRITICAL: prevent auto-upgrade of .onion to https
+      "dom.security.https_first_pbm" to false,
+      "network.http.rcwn.enabled" to false, // CRITICAL: disable race cache with network for Tor SOCKS proxy
       "security.tls.version.min" to 3, // TLS 1.2 minimum
       "security.tls.version.max" to 4, // TLS 1.3 maximum
       "network.websocket.allowInsecureFromHTTPS" to false, // Block insecure WebSocket on HTTPS
@@ -405,8 +408,10 @@ object NetworkHardening {
     var trimmed = rawUrl.trim()
     if (trimmed.isEmpty()) return "about:blank"
 
+    val isOnion = NetworkRouteAuthority.isOnionDestination(trimmed) || trimmed.contains(".onion", ignoreCase = true)
+
     // Always upgrade http:// to https:// directly unless .onion
-    if (trimmed.startsWith("http://", ignoreCase = true) && !NetworkRouteAuthority.isOnionDestination(trimmed)) {
+    if (trimmed.startsWith("http://", ignoreCase = true) && !isOnion) {
       trimmed = "https://" + trimmed.substring(7)
     }
 
@@ -417,8 +422,8 @@ object NetworkHardening {
         !trimmed.startsWith("view-source:", ignoreCase = true) &&
         !trimmed.startsWith("file:", ignoreCase = true)) {
       if (trimmed.contains(".") && !trimmed.contains(" ")) {
-        // Enforce HTTPS
-        trimmed = "https://$trimmed"
+        // Enforce HTTP for .onion and HTTPS for clearnet
+        trimmed = if (isOnion) "http://$trimmed" else "https://$trimmed"
       } else {
         // Privacy search via DuckDuckGo onion or clearnet privacy search
         val query = java.net.URLEncoder.encode(trimmed, "UTF-8")

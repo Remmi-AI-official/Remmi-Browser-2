@@ -861,8 +861,14 @@ fun resolveUserInputUrlOrSearch(query: String, searchEngine: SearchEngine): Stri
     hostPart.equals("localhost", ignoreCase = true)
   )
 
+  val isOnion = lower.contains(".onion") || hostPart.endsWith(".onion", ignoreCase = true)
+
   return if (isDirectUrl) {
-    "https://$trimmed"
+    if (isOnion) {
+      "http://$trimmed"
+    } else {
+      "https://$trimmed"
+    }
   } else {
     searchEngine.buildSearchUrl(trimmed)
   }
