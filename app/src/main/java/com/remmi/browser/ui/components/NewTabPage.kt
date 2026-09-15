@@ -293,9 +293,15 @@ fun NewTabPage(
         verticalAlignment = Alignment.CenterVertically
       ) {
         // SECURE / TOR STATUS PILL (LEFT)
-        val isGhostMode = (profile == PrivacyProfile.GHOST || CurrentTorRoute.isGhostActive)
-        val isTorConnected = (torState is TorManager.TorState.READY || CurrentTorRoute.isReady) && (isGhostMode || CurrentTorRoute.isReady)
-        val isTorConnecting = isGhostMode && !isTorConnected && (torState.isConnecting || CurrentTorRoute.currentPhase in listOf(
+        val isGhostMode = profile == PrivacyProfile.GHOST
+        val isTorOffline = torState is TorManager.TorState.OFF ||
+            torState is TorManager.TorState.STOPPING ||
+            CurrentTorRoute.currentPhase == GhostRoutePhase.SHIELD ||
+            !CurrentTorRoute.isGhostActive
+        val isTorConnected = !isTorOffline &&
+            (torState is TorManager.TorState.READY || CurrentTorRoute.isReady) &&
+            (isGhostMode || CurrentTorRoute.isGhostActive)
+        val isTorConnecting = isGhostMode && !isTorConnected && !isTorOffline && (torState.isConnecting || CurrentTorRoute.currentPhase in listOf(
           GhostRoutePhase.STARTING_TOR,
           GhostRoutePhase.VERIFYING_TOR,
           GhostRoutePhase.APPLYING_GECKO,

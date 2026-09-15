@@ -986,7 +986,11 @@ fun BrowserScreen(
                 onToggleReader = { tabManager.toggleReaderMode(activeTab.id) },
                 onInspectCircuit = { showCircuitSheet = true },
                 onSecurityShieldClick = {
-                  if (CurrentTorRoute.isReady || torState is TorManager.TorState.READY || activeTab.profile == PrivacyProfile.GHOST) {
+                  val isTorActive = (torState is TorManager.TorState.READY || CurrentTorRoute.isReady) &&
+                      torState !is TorManager.TorState.OFF &&
+                      torState !is TorManager.TorState.STOPPING &&
+                      (activeTab.profile == PrivacyProfile.GHOST || CurrentTorRoute.isGhostActive)
+                  if (isTorActive) {
                     showCircuitSheet = true
                   } else {
                     showSecuritySheet = true
