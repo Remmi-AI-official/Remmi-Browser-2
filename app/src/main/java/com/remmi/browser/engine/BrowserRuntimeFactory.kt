@@ -64,6 +64,7 @@ class BrowserRuntimeFactory private constructor(private val context: Context) {
     val builder = GeckoRuntimeSettings.Builder()
       .aboutConfigEnabled(com.remmi.browser.BuildConfig.DEBUG)
       .consoleOutput(com.remmi.browser.BuildConfig.DEBUG)
+      .enterpriseRootsEnabled(true)
 
     // Pass -profile argument so Gecko loads the isolated profile directory and user.js directly
     try {

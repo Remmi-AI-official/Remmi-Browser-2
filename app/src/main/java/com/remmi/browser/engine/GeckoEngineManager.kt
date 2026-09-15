@@ -262,6 +262,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
   private val attachedViews = mutableMapOf<String, GeckoView>()
   // Guards against duplicate attachView() calls racing from AndroidView/factory and lifecycle ON_RESUME.
   private val attachingTabs = mutableSetOf<String>()
+  private val onionFallbackAttempts = java.util.Collections.synchronizedSet(mutableSetOf<String>())
   private val _viewAttachmentStates = mutableMapOf<String, MutableStateFlow<Boolean>>()
   private val _documentRenderedStates = mutableMapOf<String, MutableStateFlow<Boolean>>()
 
@@ -2282,18 +2283,48 @@ class GeckoEngineManager private constructor(private val context: Context) {
         com.remmi.browser.util.DebugLogManager.log(errLog)
 
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
-        if (targetUrl.startsWith("https://", ignoreCase = true) && com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl)) {
-          val fallbackHttpUrl = "http://" + targetUrl.substring(8)
-          Log.i(TAG, "Onion HTTPS failed (category=${error.category}, code=${error.code}); auto-fallback to HTTP: $fallbackHttpUrl")
-          CoroutineScope(Dispatchers.Main.immediate).launch {
-            loadUrl(tabId, fallbackHttpUrl)
-          }
+
+        // 1. Security / Certificate errors (category 2):
+        // In GeckoView, returning null signals Gecko to display its native error page (aboutNetError / aboutCertError).
+        // With security.certerror.hideAddException disabled and dom.securecontext.allowlist_onions enabled,
+        // Gecko provides the "Advanced" -> "Accept the Risk and Continue" button which executes document.addCertException()
+        // and reloads the page. Overriding this with a custom data URI or redirect destroys privileged execution.
+        if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY) {
+          Log.i(TAG, "Security/Certificate error for uri=$targetUrl (category=${error.category}, code=${error.code}). Returning null to show Gecko native certificate override page.")
           return null
+        }
+
+        // 2. Onion HTTPS fallback: ONLY if port 443 connection was refused or timed out (site has no HTTPS listener)
+        // and only attempt fallback once per targetUrl to avoid redirect loops.
+        val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
+        if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion &&
+            (error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
+             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT)
+        ) {
+          if (!onionFallbackAttempts.contains(targetUrl)) {
+            onionFallbackAttempts.add(targetUrl)
+            val fallbackHttpUrl = "http://" + targetUrl.substring(8)
+            Log.i(TAG, "Onion HTTPS port connection refused/timed out (code=${error.code}); single fallback to HTTP: $fallbackHttpUrl")
+            CoroutineScope(Dispatchers.Main.immediate).launch {
+              loadUrl(tabId, fallbackHttpUrl)
+            }
+            return null
+          }
+        }
+
+        val errorCodeString = when (error.code) {
+          org.mozilla.geckoview.WebRequestError.ERROR_UNKNOWN_HOST -> "ERR_NAME_NOT_RESOLVED"
+          org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED -> "ERR_CONNECTION_REFUSED"
+          org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT -> "ERR_TIMED_OUT"
+          org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET -> "ERR_CONNECTION_RESET"
+          org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT -> "ERR_CONNECTION_CLOSED"
+          org.mozilla.geckoview.WebRequestError.ERROR_PROXY_CONNECTION_REFUSED -> "ERR_PROXY_CONNECTION_FAILED"
+          else -> if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_NETWORK) "ERR_INTERNET_DISCONNECTED" else "ERR_CONNECTION_FAILED (${error.code})"
         }
 
         val errorDataUri = OfflineErrorPageGenerator.toDataUri(
           targetUrl = targetUrl,
-          errorCode = "ERR_INTERNET_DISCONNECTED",
+          errorCode = errorCodeString,
           isDark = true
         )
         return GeckoResult.fromValue(errorDataUri)
@@ -3402,6 +3433,12 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
   fun loadUrl(tabId: String, url: String, forceReload: Boolean = false) {
     if (url.isBlank()) return
+    if (forceReload) {
+      onionFallbackAttempts.remove(url)
+    }
+    if (onionFallbackAttempts.size > 100) {
+      onionFallbackAttempts.clear()
+    }
     val tab = TabManager.getInstance().getTab(tabId)
     val isOnion = url.contains(".onion", ignoreCase = true) || com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(url)
     var isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)

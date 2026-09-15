@@ -72,8 +72,15 @@ object NetworkHardening {
       "network.lna.blocking" to true,
       "dom.security.https_only_mode" to false, // Allow HTTP connections on .onion (Hidden services use onion-crypto, not traditional TLS)
       "dom.security.https_only_mode_pbm" to false,
+      "dom.security.https_only_mode.upgrade_onion" to false, // Never force-upgrade .onion to HTTPS
       "dom.security.https_first" to false, // CRITICAL: prevent auto-upgrade of .onion to https
       "dom.security.https_first_pbm" to false,
+      "dom.securecontext.allowlist_onions" to true, // Treat .onion as a secure context
+      "security.certerror.hideAddException" to false, // Ensure 'Accept Risk & Continue' button is visible on cert errors
+      "security.dialog_enable_delay" to 0, // No countdown delay on accepting cert exceptions
+      "security.cert_pinning.enforcement_level" to 0, // Disable pinning for self-signed onion certs
+      "security.enterprise_roots.enabled" to true,
+      "security.ssl.enable_ocsp_stapling" to false, // Disable OCSP stapling over Tor
       "network.http.rcwn.enabled" to false, // CRITICAL: disable race cache with network for Tor SOCKS proxy
       "security.tls.version.min" to 3, // TLS 1.2 minimum
       "security.tls.version.max" to 4, // TLS 1.3 maximum
