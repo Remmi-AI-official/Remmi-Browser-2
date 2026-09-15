@@ -1,5 +1,6 @@
 package com.remmi.browser.engine
 
+import java.net.URI
 import java.net.URLEncoder
 
 object OfflineErrorPageGenerator {
@@ -10,11 +11,37 @@ object OfflineErrorPageGenerator {
     isDark: Boolean = true,
   ): String {
     val escapedTargetUrl = targetUrl.replace("\"", "&quot;").replace("'", "\\'")
-    val bg = if (isDark) "#1f1f1f" else "#f9f9f9"
-    val textPrimary = if (isDark) "#ffffff" else "#202124"
-    val textSecondary = if (isDark) "#d0d0d0" else "#5f6368"
-    val accentColor = "#388bfd"
-    val errCodeColor = if (isDark) "#888888" else "#70757a"
+    val isOnion = targetUrl.contains(".onion", ignoreCase = true)
+    val isHttps = targetUrl.startsWith("https://", ignoreCase = true)
+    val httpFallbackUrl = if (isOnion && isHttps && targetUrl.length > 8) {
+      "http://" + targetUrl.substring(8)
+    } else null
+    val escapedHttpFallbackUrl = httpFallbackUrl?.replace("\"", "&quot;")?.replace("'", "\\'")
+
+    val host = try {
+      val parsed = URI(targetUrl)
+      parsed.host ?: targetUrl
+    } catch (_: Exception) {
+      targetUrl
+    }
+    val escapedHost = host.replace("\"", "&quot;").replace("'", "\\'").take(50)
+
+    val bg = if (isDark) "#0f172a" else "#f8fafc"
+    val cardBg = if (isDark) "#1e293b" else "#ffffff"
+    val cardBorder = if (isDark) "#334155" else "#e2e8f0"
+    val textPrimary = if (isDark) "#f8fafc" else "#0f172a"
+    val textSecondary = if (isDark) "#94a3b8" else "#64748b"
+    val accentColor = if (isOnion) "#a855f7" else "#388bfd"
+    val errCodeColor = if (isDark) "#64748b" else "#94a3b8"
+    val buttonBg = if (isOnion) "#9333ea" else "#2563eb"
+    val buttonText = "#ffffff"
+
+    val title = if (isOnion) "Onion Site Unreachable" else "You're not connected"
+    val subtitle = if (isOnion) {
+      "Could not establish a secure circuit to <strong>$escapedHost</strong> over the Tor network."
+    } else {
+      "And the web just isn't the same without you. Let's get you back online!"
+    }
 
     return """
 <!DOCTYPE html>
@@ -22,7 +49,7 @@ object OfflineErrorPageGenerator {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Offline • You're not connected</title>
+  <title>$title</title>
   <style>
     * {
       box-sizing: border-box;
@@ -37,166 +64,211 @@ object OfflineErrorPageGenerator {
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      justify-content: flex-start;
-      padding: 40px 24px 32px 24px;
+      justify-content: center;
+      align-items: center;
+      padding: 32px 20px;
       line-height: 1.5;
     }
-    .container {
+    .card {
+      background-color: $cardBg;
+      border: 1px solid $cardBorder;
+      border-radius: 16px;
       max-width: 480px;
       width: 100%;
-      margin: 0 auto;
+      padding: 32px 24px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, ${if (isDark) "0.4" else "0.08"});
     }
     .icon-wrapper {
-      margin-bottom: 28px;
-      display: inline-block;
-    }
-    .globe-icon {
-      width: 72px;
-      height: 72px;
-      stroke: $textPrimary;
-      stroke-width: 1.6;
-      fill: none;
+      margin-bottom: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: ${if (isOnion) (if (isDark) "#2e1065" else "#f3e8ff") else (if (isDark) "#1e3a8a" else "#eff6ff")};
+      color: $accentColor;
     }
     .title {
-      font-size: 26px;
+      font-size: 22px;
       font-weight: 700;
       letter-spacing: -0.3px;
-      margin-bottom: 16px;
+      margin-bottom: 10px;
       color: $textPrimary;
     }
     .subtitle {
-      font-size: 15.5px;
+      font-size: 14.5px;
       color: $textSecondary;
-      margin-bottom: 24px;
-      line-height: 1.45;
+      margin-bottom: 20px;
+      line-height: 1.5;
     }
-    .try-heading {
-      font-size: 15.5px;
-      font-weight: 600;
-      margin-bottom: 12px;
+    .try-box {
+      background: ${if (isDark) "#0f172a" else "#f1f5f9"};
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      font-size: 13.5px;
+      color: $textSecondary;
+      line-height: 1.6;
+    }
+    .try-box strong {
       color: $textPrimary;
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
     }
     .try-list {
       list-style-type: none;
-      margin-bottom: 32px;
+      padding-left: 0;
     }
     .try-list li {
       position: relative;
-      padding-left: 20px;
-      margin-bottom: 8px;
-      font-size: 15px;
-      color: $textSecondary;
+      padding-left: 18px;
+      margin-bottom: 4px;
     }
     .try-list li::before {
       content: "•";
       position: absolute;
       left: 4px;
-      top: -1px;
-      font-size: 18px;
-      color: $textSecondary;
+      color: $accentColor;
+      font-weight: bold;
     }
     .error-code {
       font-size: 11.5px;
       font-family: ui-monospace, "SF Mono", "Cascadia Code", Roboto, monospace;
       color: $errCodeColor;
       letter-spacing: 0.5px;
-      margin-bottom: 10px;
+      margin-bottom: 20px;
       text-transform: uppercase;
     }
-    .action-row {
-      margin-top: 6px;
-      margin-bottom: 14px;
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
-    .reload-btn {
-      color: $accentColor;
-      font-size: 15px;
-      font-weight: 700;
-      text-decoration: underline;
-      letter-spacing: 0.2px;
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 10px;
       cursor: pointer;
-      display: inline-block;
-      text-transform: uppercase;
-      padding: 4px 0;
+      border: none;
+      transition: opacity 0.15s ease, transform 0.1s ease;
+      text-align: center;
     }
-    .reload-btn:active {
-      opacity: 0.7;
+    .btn:active {
+      transform: scale(0.98);
+      opacity: 0.85;
     }
-    .footer-note {
-      font-size: 14.5px;
-      color: $textSecondary;
-      line-height: 1.4;
+    .btn-primary {
+      background-color: $buttonBg;
+      color: $buttonText;
     }
-    .cancel-link {
+    .btn-secondary {
+      background-color: transparent;
+      color: $textPrimary;
+      border: 1px solid $cardBorder;
+    }
+    .btn-tertiary {
+      background-color: transparent;
       color: $accentColor;
-      text-decoration: underline;
-      cursor: pointer;
-    }
-    .cancel-link:active {
-      opacity: 0.7;
+      font-size: 13.5px;
+      padding: 8px;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
+      50% { opacity: 0.5; }
     }
-    .loading-state {
-      animation: pulse 1.5s infinite;
+    .loading {
+      animation: pulse 1.2s infinite;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="card">
     <div class="icon-wrapper">
-      <svg class="globe-icon" viewBox="0 0 24 24">
-        <!-- Globe circle -->
-        <circle cx="12" cy="12" r="9.5"></circle>
-        <!-- Equator line -->
-        <line x1="2.5" y1="12" x2="21.5" y2="12"></line>
-        <!-- Meridian loop -->
-        <ellipse cx="12" cy="12" rx="4.5" ry="9.5"></ellipse>
-        <!-- Disconnection Slash -->
-        <circle cx="17.5" cy="17.5" r="4.5" fill="$bg" stroke="$textPrimary" stroke-width="1.6"></circle>
-        <line x1="14.5" y1="14.5" x2="20.5" y2="20.5" stroke="$textPrimary" stroke-width="1.8" stroke-linecap="round"></line>
+      ${if (isOnion) """
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12A10 10 0 0 1 12 2z"/>
+        <path d="M12 6a6 6 0 0 1 6 6c0 3.314-2.686 6-6 6s-6-2.686-6-6a6 6 0 0 1 6-6z"/>
+        <circle cx="12" cy="12" r="2"/>
       </svg>
+      """ else """
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="2" y1="12" x2="22" y2="12"/>
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+      </svg>
+      """}
     </div>
 
-    <h1 class="title">You're not connected</h1>
+    <h1 class="title">$title</h1>
+    <p class="subtitle">$subtitle</p>
 
-    <p class="subtitle">And the web just isn't the same without you. Let's get you back online!</p>
-
-    <p class="try-heading">Try:</p>
-    <ul class="try-list">
-      <li>Turning off airplane mode</li>
-      <li>Turning on mobile data or Wi-Fi</li>
-      <li>Checking the signal in your area</li>
-    </ul>
+    <div class="try-box">
+      <strong>${if (isOnion) "Tor Onion Diagnosis:" else "Try:"}</strong>
+      <ul class="try-list">
+        ${if (isOnion) """
+        <li>Onion hidden services can take 15-30 seconds to establish circuits.</li>
+        <li>The onion host may be temporarily offline or under heavy traffic.</li>
+        ${if (httpFallbackUrl != null) "<li>Hidden services are natively encrypted by Tor; HTTPS is often not configured.</li>" else ""}
+        """ else """
+        <li>Turning off airplane mode</li>
+        <li>Turning on mobile data or Wi-Fi</li>
+        <li>Checking the signal in your area</li>
+        """}
+      </ul>
+    </div>
 
     <div class="error-code">$errorCode</div>
 
-    <div class="action-row">
-      <a id="reloadBtn" class="reload-btn" onclick="retryNavigation()">LOAD PAGE LATER</a>
+    <div class="btn-group">
+      ${if (httpFallbackUrl != null) """
+      <button class="btn btn-primary" onclick="tryHttpFallback()">
+        OPEN VIA HTTP (TOR ENCRYPTED)
+      </button>
+      <button id="retryBtn" class="btn btn-secondary" onclick="retryNavigation()">
+        RETRY HTTPS
+      </button>
+      """ else """
+      <button id="retryBtn" class="btn btn-primary" onclick="retryNavigation()">
+        ${if (isOnion) "RETRY ONION CIRCUIT" else "RELOAD PAGE"}
+      </button>
+      """}
+      <button class="btn btn-tertiary" onclick="handleCancel()">
+        Return to Home
+      </button>
     </div>
-
-    <p class="footer-note">
-      Remmi Browser will let you know when this page is ready. <a class="cancel-link" onclick="handleCancel()">Cancel</a>
-    </p>
   </div>
 
   <script>
     const targetUrl = "$escapedTargetUrl";
+    const httpFallback = ${if (escapedHttpFallbackUrl != null) "\"$escapedHttpFallbackUrl\"" else "null"};
     let isRetrying = false;
 
     function retryNavigation() {
       if (isRetrying) return;
-      const btn = document.getElementById('reloadBtn');
-      if (btn) {
-        btn.textContent = "CHECKING CONNECTION...";
-        btn.classList.add('loading-state');
-      }
       isRetrying = true;
-      if (targetUrl && targetUrl !== "" && !targetUrl.startsWith("data:")) {
+      const btn = document.getElementById('retryBtn');
+      if (btn) {
+        btn.textContent = "Connecting to circuit...";
+        btn.classList.add('loading');
+      }
+      if (targetUrl && !targetUrl.startsWith("data:")) {
         window.location.href = targetUrl;
       } else {
         window.location.reload();
+      }
+    }
+
+    function tryHttpFallback() {
+      if (httpFallback) {
+        window.location.href = httpFallback;
       }
     }
 
@@ -208,7 +280,6 @@ object OfflineErrorPageGenerator {
       }
     }
 
-    // Auto-reload as soon as internet connection is restored
     window.addEventListener('online', function() {
       retryNavigation();
     });

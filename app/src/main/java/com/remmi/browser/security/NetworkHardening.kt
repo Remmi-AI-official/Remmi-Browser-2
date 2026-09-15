@@ -77,10 +77,13 @@ object NetworkHardening {
       "dom.security.https_first_pbm" to false,
       "dom.securecontext.allowlist_onions" to true, // Treat .onion as a secure context
       "security.certerror.hideAddException" to false, // Ensure 'Accept Risk & Continue' button is visible on cert errors
+      "security.certerrors.permanentOverride" to true,
       "security.dialog_enable_delay" to 0, // No countdown delay on accepting cert exceptions
       "security.cert_pinning.enforcement_level" to 0, // Disable pinning for self-signed onion certs
       "security.enterprise_roots.enabled" to true,
+      "security.OCSP.enabled" to 0,
       "security.ssl.enable_ocsp_stapling" to false, // Disable OCSP stapling over Tor
+      "network.stricttransportsecurity.preloadlist" to false,
       "network.http.rcwn.enabled" to false, // CRITICAL: disable race cache with network for Tor SOCKS proxy
       "security.tls.version.min" to 3, // TLS 1.2 minimum
       "security.tls.version.max" to 4, // TLS 1.3 maximum

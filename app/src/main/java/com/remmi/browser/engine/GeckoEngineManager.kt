@@ -2283,28 +2283,36 @@ class GeckoEngineManager private constructor(private val context: Context) {
         com.remmi.browser.util.DebugLogManager.log(errLog)
 
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
+        val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
 
         // 1. Security / Certificate errors (category 2):
-        // In GeckoView, returning null signals Gecko to display its native error page (aboutNetError / aboutCertError).
-        // With security.certerror.hideAddException disabled and dom.securecontext.allowlist_onions enabled,
-        // Gecko provides the "Advanced" -> "Accept the Risk and Continue" button which executes document.addCertException()
-        // and reloads the page. Overriding this with a custom data URI or redirect destroys privileged execution.
+        // In GeckoView, returning about:certerror instructs Gecko to display its native certificate warning page.
+        // With security.certerror.hideAddException=false, security.certerrors.permanentOverride=true,
+        // and dom.securecontext.allowlist_onions=true, Gecko provides the "Advanced" -> "Accept the Risk and Continue" button,
+        // which calls document.addCertException() with internal privileges and reloads the page.
+        // Returning null aborts navigation. Returning about:certerror provides the full interactive exception flow.
         if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY) {
-          Log.i(TAG, "Security/Certificate error for uri=$targetUrl (category=${error.category}, code=${error.code}). Returning null to show Gecko native certificate override page.")
-          return null
+          Log.i(TAG, "Security/Certificate error for uri=$targetUrl (category=${error.category}, code=${error.code}). Displaying native certificate override UI.")
+          val encoded = try {
+            java.net.URLEncoder.encode(targetUrl, "UTF-8")
+          } catch (_: Exception) {
+            targetUrl
+          }
+          return GeckoResult.fromValue("about:certerror?e=nssBadCert&u=$encoded")
         }
 
-        // 2. Onion HTTPS fallback: ONLY if port 443 connection was refused or timed out (site has no HTTPS listener)
+        // 2. Onion HTTPS fallback: if connection failed on port 443 (refused, timed out, reset, or interrupt)
         // and only attempt fallback once per targetUrl to avoid redirect loops.
-        val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
         if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion &&
             (error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
-             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT)
+             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
+             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
+             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT)
         ) {
           if (!onionFallbackAttempts.contains(targetUrl)) {
             onionFallbackAttempts.add(targetUrl)
             val fallbackHttpUrl = "http://" + targetUrl.substring(8)
-            Log.i(TAG, "Onion HTTPS port connection refused/timed out (code=${error.code}); single fallback to HTTP: $fallbackHttpUrl")
+            Log.i(TAG, "Onion HTTPS port connection failed (code=${error.code}); single fallback to HTTP: $fallbackHttpUrl")
             CoroutineScope(Dispatchers.Main.immediate).launch {
               loadUrl(tabId, fallbackHttpUrl)
             }

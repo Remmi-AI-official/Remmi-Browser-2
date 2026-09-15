@@ -381,56 +381,64 @@ fun NewTabPage(
 
         // RIGHT ACTION BUTTONS (Theme & Settings)
         Row(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
           // Theme Switcher Button
-          IconButton(
-            onClick = { showThemeDialog = true },
+          Box(
             modifier = Modifier
-              .size(38.dp)
+              .size(40.dp)
               .clip(CircleShape)
               .background(
-                if (isLight) Color.White.copy(alpha = 0.85f)
-                else Color(0xFF1E293B).copy(alpha = 0.8f)
+                if (isLight) Color.White.copy(alpha = 0.9f)
+                else Color(0xFF1E293B).copy(alpha = 0.85f)
               )
               .border(
                 1.dp,
-                if (isLight) Color(0xFFE2E8F0) else Color(0xFF334155),
+                if (isLight) Color(0xFFCBD5E1) else Color(0xFF334155),
                 CircleShape
               )
-              .testTag("home_theme_toggle_button")
+              .clickable(
+                role = androidx.compose.ui.semantics.Role.Button,
+                onClick = { showThemeDialog = true }
+              )
+              .testTag("home_theme_toggle_button"),
+            contentAlignment = Alignment.Center
           ) {
             Icon(
               imageVector = Icons.Default.Palette,
               contentDescription = "Switch Theme",
               tint = ThemeCyber.colors.primary,
-              modifier = Modifier.size(18.dp)
+              modifier = Modifier.size(19.dp)
             )
           }
 
           // Settings Button
-          IconButton(
-            onClick = onOpenSettings,
+          Box(
             modifier = Modifier
-              .size(38.dp)
+              .size(40.dp)
               .clip(CircleShape)
               .background(
-                if (isLight) Color.White.copy(alpha = 0.85f)
-                else Color(0xFF1E293B).copy(alpha = 0.8f)
+                if (isLight) Color.White.copy(alpha = 0.9f)
+                else Color(0xFF1E293B).copy(alpha = 0.85f)
               )
               .border(
                 1.dp,
-                if (isLight) Color(0xFFE2E8F0) else Color(0xFF334155),
+                if (isLight) Color(0xFFCBD5E1) else Color(0xFF334155),
                 CircleShape
               )
-              .testTag("home_settings_button")
+              .clickable(
+                role = androidx.compose.ui.semantics.Role.Button,
+                onClick = onOpenSettings
+              )
+              .testTag("home_settings_button"),
+            contentAlignment = Alignment.Center
           ) {
             Icon(
               imageVector = Icons.Default.Settings,
               contentDescription = "Settings",
               tint = if (isLight) Color(0xFF475569) else Color(0xFF94A3B8),
-              modifier = Modifier.size(18.dp)
+              modifier = Modifier.size(19.dp)
             )
           }
         }
