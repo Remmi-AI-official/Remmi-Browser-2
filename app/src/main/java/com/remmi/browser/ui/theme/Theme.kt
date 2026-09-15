@@ -27,9 +27,13 @@ fun RemmiTheme(
     AppearanceMode.DARK -> true
   }
 
-  // Unified Single Source of Truth:
-  // cyberTheme directly specifies the active visual and accent palette.
-  val effectiveTheme = cyberTheme
+  // If Cyberpunk HUD is disabled (default), always use clean normal default theme
+  val effectiveTheme = when {
+    !cyberHudEnabled -> if (effectiveIsDark) CyberTheme.MINIMAL_DARK else CyberTheme.NORMAL_DEFAULT
+    !effectiveIsDark && !cyberTheme.isLight -> CyberTheme.NORMAL_DEFAULT
+    effectiveIsDark && cyberTheme.isLight -> CyberTheme.MINIMAL_DARK
+    else -> cyberTheme
+  }
 
   val isLight = if (pureBlackOled) false else effectiveTheme.isLight
   val isNormal = effectiveTheme.isNormalTheme

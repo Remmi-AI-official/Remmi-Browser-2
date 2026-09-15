@@ -113,7 +113,6 @@ fun NewTabPage(
   wallpaperDimLevel: Float = 0.0f,
   fullscreenWallpaperEnabled: Boolean = true,
   wallpaperScaleMode: String = "CROP",
-  currentTheme: CyberTheme = CyberTheme.NORMAL_DEFAULT,
   onSearch: (query: String, engine: SearchEngine) -> Unit = { _, _ -> },
   onNavigate: (String) -> Unit = {},
   onSelectSearchEngine: (SearchEngine) -> Unit = {},
@@ -1083,109 +1082,6 @@ fun NewTabPage(
       }
 
       // ==========================================
-      // 5B. QUICK THEME SHORTCUT CHIPS
-      // Single-click instant application
-      // ==========================================
-      Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = if (isLight) Color.White.copy(alpha = 0.9f) else Color(0xFF131B26).copy(alpha = 0.85f),
-        border = BorderStroke(1.dp, if (isLight) Color(0xFFE2E8F0) else Color(0xFF1E293B)),
-        shadowElevation = if (isLight) 1.5.dp else 0.dp,
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(bottom = 16.dp)
-          .testTag("home_quick_theme_chips_container")
-      ) {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp, horizontal = 12.dp),
-          verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              Icon(
-                imageVector = Icons.Default.Palette,
-                contentDescription = null,
-                tint = ThemeCyber.colors.primary,
-                modifier = Modifier.size(15.dp)
-              )
-              Text(
-                text = "Themes & Accents",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (isLight) Color(0xFF475569) else Color(0xFF94A3B8)
-              )
-            }
-            Text(
-              text = "Tap to apply",
-              fontSize = 10.5.sp,
-              color = if (isLight) Color(0xFF94A3B8) else Color(0xFF64748B)
-            )
-          }
-
-          LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-          ) {
-            items(CyberTheme.entries) { theme ->
-              val isSelected = theme == currentTheme
-              Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) {
-                  theme.primaryAccent.copy(alpha = if (isLight) 0.14f else 0.22f)
-                } else {
-                  if (isLight) Color(0xFFF8FAFC) else Color(0xFF1E293B)
-                },
-                border = BorderStroke(
-                  width = if (isSelected) 1.5.dp else 1.dp,
-                  color = if (isSelected) theme.primaryAccent else if (isLight) Color(0xFFE2E8F0) else Color(0xFF334155)
-                ),
-                modifier = Modifier
-                  .clip(RoundedCornerShape(12.dp))
-                  .clickable { onSelectTheme(theme) }
-                  .testTag("home_theme_chip_${theme.id.lowercase()}")
-              ) {
-                Row(
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(10.dp)
-                      .clip(CircleShape)
-                      .background(theme.primaryAccent)
-                  )
-                  Text(
-                    text = theme.displayName,
-                    fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) theme.primaryAccent else if (isLight) Color(0xFF1E293B) else Color(0xFFF1F5F9)
-                  )
-                  if (isSelected) {
-                    Icon(
-                      imageVector = Icons.Default.Check,
-                      contentDescription = "Active",
-                      tint = theme.primaryAccent,
-                      modifier = Modifier.size(12.dp)
-                    )
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // ==========================================
       // 6. FAVORITES / SHORTCUTS SECTION
       // ==========================================
       Column(
@@ -1329,7 +1225,6 @@ fun NewTabPage(
   // 1. THEME & LIVE ANIMATION SELECTOR DIALOG
   if (showThemeDialog) {
     ThemeSelectorDialog(
-      currentTheme = currentTheme,
       currentAnimation = backgroundAnimation,
       customWallpaperUri = customWallpaperUri,
       wallpaperDimLevel = wallpaperDimLevel,
@@ -1675,7 +1570,6 @@ private fun FavoriteAddTile(
  */
 @Composable
 private fun ThemeSelectorDialog(
-  currentTheme: CyberTheme = CyberTheme.NORMAL_DEFAULT,
   currentAnimation: String,
   customWallpaperUri: String?,
   wallpaperDimLevel: Float,
@@ -1931,22 +1825,15 @@ private fun ThemeSelectorDialog(
                 modifier = Modifier.heightIn(max = 280.dp)
               ) {
                 items(themes) { theme ->
-                  val isSelected = theme == currentTheme
                   Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) {
-                      theme.primaryAccent.copy(alpha = if (theme.isLight) 0.14f else 0.22f)
-                    } else if (theme.isLight) Color(0xFFF8FAFC) else Color(0xFF1E293B),
-                    border = BorderStroke(
-                      width = if (isSelected) 2.dp else 1.dp,
-                      color = if (isSelected) theme.primaryAccent else (if (isLight) Color(0xFFE2E8F0) else Color(0xFF334155))
-                    ),
+                    color = if (theme.isLight) Color(0xFFF8FAFC) else Color(0xFF1E293B),
+                    border = BorderStroke(1.5.dp, theme.primaryAccent),
                     modifier = Modifier
                       .fillMaxWidth()
                       .height(60.dp)
                       .clip(RoundedCornerShape(12.dp))
                       .clickable { onSelectTheme(theme) }
-                      .testTag("dialog_theme_card_${theme.id.lowercase()}")
                   ) {
                     Row(
                       modifier = Modifier
@@ -1961,7 +1848,7 @@ private fun ThemeSelectorDialog(
                           .clip(CircleShape)
                           .background(theme.primaryAccent)
                       )
-                      Column(modifier = Modifier.weight(1f)) {
+                      Column {
                         Text(
                           text = theme.displayName,
                           fontSize = 11.5.sp,
@@ -1974,22 +1861,6 @@ private fun ThemeSelectorDialog(
                           fontSize = 10.sp,
                           color = if (theme.isLight) Color(0xFF64748B) else Color(0xFF94A3B8)
                         )
-                      }
-                      if (isSelected) {
-                        Box(
-                          modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(theme.primaryAccent),
-                          contentAlignment = Alignment.Center
-                        ) {
-                          Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Selected",
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                          )
-                        }
                       }
                     }
                   }

@@ -383,14 +383,14 @@ fun BrowserView(
     }
   }
 
-  val surfaceColor = com.remmi.browser.engine.GeckoDarkModeHelper.getCanvasBackgroundColor(context)
+  val surfaceColor = if (ThemeCyber.colors.isLight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#121824")
   val primaryColorInt = android.graphics.Color.argb(
     (ThemeCyber.colors.primary.alpha * 255).toInt(),
     (ThemeCyber.colors.primary.red * 255).toInt(),
     (ThemeCyber.colors.primary.green * 255).toInt(),
     (ThemeCyber.colors.primary.blue * 255).toInt()
   )
-  val progressBgColor = if (surfaceColor == com.remmi.browser.engine.GeckoDarkModeHelper.COLOR_LIGHT) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#1E2430")
+  val progressBgColor = if (ThemeCyber.colors.isLight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#1E2430")
   val isRealWebPage = !tab.isReaderMode && tab.url.isNotBlank() && tab.url != "about:blank" && tab.url != "remmi://newtab" && tab.url != "about:home"
 
   Box(

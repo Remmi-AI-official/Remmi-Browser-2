@@ -242,7 +242,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
     assertMainThread("getOrCreateGeckoView id=$tabId")
     val existing = geckoViewPool[tabId]
     if (existing != null) {
-      GeckoDarkModeHelper.prepareViewForNavigation(existing, context)
       return existing
     }
     val newView = GeckoView(context).apply {
@@ -255,7 +254,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
       isNestedScrollingEnabled = false
       setDynamicToolbarMaxHeight(0)
       tag = tabId
-      setBackgroundColor(GeckoDarkModeHelper.getCanvasBackgroundColor(context))
     }
     geckoViewPool[tabId] = newView
     return newView
@@ -1430,12 +1428,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
       com.remmi.browser.util.DebugLogManager.log("[WEBEXT] Installation exception: ${t.message}")
     }
 
-    try {
-      GeckoDarkModeHelper.init(context, rt)
-    } catch (dmEx: Throwable) {
-      Log.w(TAG, "GeckoDarkModeHelper init notice: ${dmEx.message}")
-    }
-
     applyPrivacyProfile(currentProfile)
     val duration = android.os.SystemClock.elapsedRealtime() - startTime
     watchdog.stop()
@@ -2321,12 +2313,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
         logContentProcessEvent(event = "READY", tabId = tabId, session = session, url = url, reason = "PAGE_START")
         getMemoryForensicSnapshot("NAV_START")
 
-        val gv = attachedViews[tabId] ?: geckoViewPool[tabId]
-        GeckoDarkModeHelper.prepareViewForNavigation(gv, context)
-        if (!isInternalOrIgnoredUrl(url)) {
-          GeckoDarkModeHelper.applySmartDarkToSession(session, url, context)
-        }
-
         val activeRecovery = activeRecoveries[tabId]
         if (activeRecovery != null && 
             activeRecovery.session === session && 
@@ -2465,8 +2451,12 @@ class GeckoEngineManager private constructor(private val context: Context) {
         if (!success) {
           checkPostNavFailure(tabId, "PAGE_STOP_FAILED", currUrl)
         } else {
-          if (!isInternalOrIgnoredUrl(currUrl)) {
-            GeckoDarkModeHelper.applySmartDarkToSession(session, currUrl, context)
+          val currentSettings = com.remmi.browser.storage.SettingsRepository.getInstance(context).settings.value
+          if (currentSettings.darkThemeForAllWebPages && !isInternalOrIgnoredUrl(currUrl)) {
+            val forceDarkJs = "javascript:(function(){try{if(document.getElementById('__remmi_dark_mode_style'))return;var s=document.createElement('style');s.id='__remmi_dark_mode_style';s.textContent=':root,html{color-scheme:dark!important;}@media(prefers-color-scheme:light),(prefers-color-scheme:no-preference){html,body{background-color:#121212!important;color:#e0e0e0!important;}}';(document.head||document.documentElement).appendChild(s);}catch(e){}})();"
+            try {
+              session.loadUri(forceDarkJs)
+            } catch (_: Exception) {}
           }
         }
 
@@ -3419,9 +3409,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
       return
     }
     assertMainThread("LOAD_URL id=$tabId")
-
-    val targetGv = attachedViews[tabId] ?: geckoViewPool[tabId]
-    GeckoDarkModeHelper.prepareViewForNavigation(targetGv, context)
     
     val bridge = com.remmi.adblock.AdblockBridge.getInstance()
     val rulesCount = bridge.getLoadedRulesCount()
@@ -3693,13 +3680,10 @@ class GeckoEngineManager private constructor(private val context: Context) {
   fun updateDarkThemeSettings(darkTheme: Boolean) {
     mainHandler.post {
       try {
-        GeckoDarkModeHelper.setPreferredColorScheme(runtime, darkTheme)
-        val canvasBg = GeckoDarkModeHelper.getCanvasBackgroundColor(context)
-        attachedViews.values.forEach { view ->
-          view.setBackgroundColor(canvasBg)
-        }
-        geckoViewPool.values.forEach { view ->
-          view.setBackgroundColor(canvasBg)
+        runtime?.settings?.preferredColorScheme = if (darkTheme) {
+          GeckoRuntimeSettings.COLOR_SCHEME_DARK
+        } else {
+          GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
         }
       } catch (e: Exception) {
         Log.w(TAG, "Failed to update preferredColorScheme: ${e.message}")

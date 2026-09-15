@@ -58,7 +58,6 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DesktopWindows
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Home
@@ -928,7 +927,6 @@ fun BrowserScreen(
                 onSelectSearchEngine = { engine ->
                   settingsRepo.updateSearchEngine(engine.displayName)
                 },
-                currentTheme = settings.cyberTheme,
                 onSelectTheme = { theme ->
                   settingsRepo.updateCyberTheme(theme)
                 },
@@ -1753,54 +1751,6 @@ fun BrowserScreen(
                 onClick = {
                   showMenuDropdown = false
                   handleToggleDesktopMode()
-                }
-              )
-
-              // Site Dark Mode Toggle (Quick Toggle)
-              val isSiteDark = com.remmi.browser.engine.GeckoDarkModeHelper.isSiteDarkModeEnabled(activeTab.url, settings.darkThemeForAllWebPages)
-              DropdownMenuItem(
-                text = {
-                  Text(
-                    "Dark Mode",
-                    color = if (isSiteDark) ThemeCyber.colors.primary else ThemeCyber.colors.textPrimary,
-                    fontFamily = ThemeCyber.fontFamily,
-                    fontSize = 13.5.sp,
-                    fontWeight = if (isSiteDark) FontWeight.SemiBold else FontWeight.Normal,
-                  )
-                },
-                leadingIcon = {
-                  Icon(
-                    imageVector = Icons.Default.DarkMode,
-                    contentDescription = null,
-                    tint = if (isSiteDark) ThemeCyber.colors.primary else ThemeCyber.colors.textSecondary,
-                    modifier = Modifier.size(18.dp)
-                  )
-                },
-                trailingIcon = {
-                  Checkbox(
-                    checked = isSiteDark,
-                    onCheckedChange = null,
-                    colors = CheckboxDefaults.colors(
-                      checkedColor = ThemeCyber.colors.primary,
-                      checkmarkColor = ThemeCyber.colors.background,
-                      uncheckedColor = ThemeCyber.colors.textSecondary.copy(alpha = 0.6f)
-                    ),
-                    modifier = Modifier.size(20.dp)
-                  )
-                },
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                modifier = Modifier.testTag("menu_dark_mode_toggle"),
-                onClick = {
-                  showMenuDropdown = false
-                  com.remmi.browser.engine.GeckoDarkModeHelper.toggleSiteDarkMode(
-                    context,
-                    activeTab.url,
-                    settings.darkThemeForAllWebPages
-                  )
-                  val sess = geckoEngine.getSession(activeTab.id)
-                  if (sess != null) {
-                    com.remmi.browser.engine.GeckoDarkModeHelper.applySmartDarkToSession(sess, activeTab.url, context)
-                  }
                 }
               )
 

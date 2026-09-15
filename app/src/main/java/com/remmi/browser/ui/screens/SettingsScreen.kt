@@ -1439,6 +1439,46 @@ private fun AppearanceSubScreen(
               )
             )
           }
+
+          Divider(
+            color = cardBorder.copy(alpha = 0.5f),
+            thickness = 0.8.dp,
+            modifier = Modifier.padding(vertical = 2.dp)
+          )
+
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+              Text(
+                text = "Cyberpunk HUD Theme",
+                color = textPrimary,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Medium
+              )
+              Spacer(modifier = Modifier.height(3.dp))
+              Text(
+                text = "Enable futuristic Cyberpunk HUD accent themes and neon cyber styling. Kept OFF by default to maintain the clean standard Normal theme.",
+                color = textSecondary,
+                fontSize = 12.5.sp,
+                lineHeight = 16.sp
+              )
+            }
+            Switch(
+              checked = settings.cyberHudEnabled,
+              onCheckedChange = { enabled ->
+                settingsRepo.updateCyberHudEnabled(enabled)
+              },
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF388BFD)
+              )
+            )
+          }
         }
       }
     }
@@ -1446,7 +1486,7 @@ private fun AppearanceSubScreen(
     // Theme selection
     item {
       Spacer(modifier = Modifier.height(4.dp))
-      SubSectionHeader("BROWSER THEMES & ACCENTS", textSecondary)
+      SubSectionHeader("CYBERPUNK HUD ACCENT THEME", textSecondary)
     }
 
     item {

@@ -5,7 +5,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import kotlinx.coroutines.flow.asStateFlow
 
 enum class CyberTheme(
   val id: String,
@@ -165,91 +164,3 @@ object ThemeCyber {
     @ReadOnlyComposable
     get() = LocalCyberFontFamily.current
 }
-
-/**
- * Unified Theme State Machine & Single Source of Truth
- *
- * Direct state binding:
- * - NORMAL_DEFAULT:
- *     Appearance = LIGHT, HUD Mode = DISABLED, Accent = Default Chrome/Blue (#1A73E8)
- * - NORMAL (DARK) / MINIMAL_DARK:
- *     Appearance = DARK, HUD Mode = DISABLED, Accent = Neutral Dark (#8AB4F8)
- * - Cyberpunk Accents (JARVIS, STARK_IND, VERONICA, CYBER_MATRIX):
- *     Appearance = DARK, HUD Mode = ENABLED, Accent = Neon Accent Hex
- */
-class ThemeManager private constructor(private val context: android.content.Context) {
-  private val prefs: android.content.SharedPreferences =
-    context.getSharedPreferences("remmi_sec_prefs", android.content.Context.MODE_PRIVATE)
-
-  private val _currentTheme = kotlinx.coroutines.flow.MutableStateFlow(loadInitialTheme())
-  val currentTheme: kotlinx.coroutines.flow.StateFlow<CyberTheme> = _currentTheme.asStateFlow()
-
-  private val _hudEnabled = kotlinx.coroutines.flow.MutableStateFlow(loadInitialHud())
-  val hudEnabled: kotlinx.coroutines.flow.StateFlow<Boolean> = _hudEnabled.asStateFlow()
-
-  private val _appearanceMode = kotlinx.coroutines.flow.MutableStateFlow(loadInitialAppearance())
-  val appearanceMode: kotlinx.coroutines.flow.StateFlow<com.remmi.browser.storage.AppearanceMode> = _appearanceMode.asStateFlow()
-
-  private fun loadInitialTheme(): CyberTheme {
-    val id = prefs.getString("cyber_theme", CyberTheme.NORMAL_DEFAULT.id)
-    return CyberTheme.fromId(id)
-  }
-
-  private fun loadInitialHud(): Boolean {
-    val theme = loadInitialTheme()
-    return !theme.isNormalTheme
-  }
-
-  private fun loadInitialAppearance(): com.remmi.browser.storage.AppearanceMode {
-    val theme = loadInitialTheme()
-    return if (theme == CyberTheme.NORMAL_DEFAULT) {
-      com.remmi.browser.storage.AppearanceMode.LIGHT
-    } else {
-      com.remmi.browser.storage.AppearanceMode.DARK
-    }
-  }
-
-  /**
-   * Applies a theme atomically using the unified state machine.
-   */
-  fun applyTheme(theme: CyberTheme) {
-    val isCyber = !theme.isNormalTheme
-    val appearance = if (theme == CyberTheme.NORMAL_DEFAULT) {
-      com.remmi.browser.storage.AppearanceMode.LIGHT
-    } else {
-      com.remmi.browser.storage.AppearanceMode.DARK
-    }
-    val hud = isCyber
-
-    prefs.edit()
-      .putString("cyber_theme", theme.id)
-      .putString("appearance_mode", appearance.id)
-      .putBoolean("cyber_hud_enabled", hud)
-      .apply()
-
-    _currentTheme.value = theme
-    _appearanceMode.value = appearance
-    _hudEnabled.value = hud
-
-    // Synchronize with SettingsRepository
-    com.remmi.browser.storage.SettingsRepository.getInstance(context).syncThemeFromManager(theme, appearance, hud)
-
-    // Synchronize with GeckoView
-    try {
-      val isDark = (appearance == com.remmi.browser.storage.AppearanceMode.DARK)
-      com.remmi.browser.engine.GeckoEngineManager.getInstance(context).updateDarkThemeSettings(isDark)
-    } catch (_: Exception) {}
-  }
-
-  companion object {
-    @Volatile
-    private var INSTANCE: ThemeManager? = null
-
-    fun getInstance(context: android.content.Context): ThemeManager {
-      return INSTANCE ?: synchronized(this) {
-        INSTANCE ?: ThemeManager(context.applicationContext).also { INSTANCE = it }
-      }
-    }
-  }
-}
-
