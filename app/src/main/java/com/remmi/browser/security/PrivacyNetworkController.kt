@@ -281,6 +281,9 @@ class PrivacyNetworkController private constructor(private val context: Context)
       // Ensure all tabs reflect the global APP-WIDE Tor proxy routing
       TabManager.getInstance().setAllTabsProfile(PrivacyProfile.GHOST)
 
+      // Dispatch any queued navigations waiting for Tor gate to open
+      torLifecycle.dispatchQueuedNavigations()
+
       DebugLogManager.log("[ROUTE] GHOST_ROUTE_READY profile=GHOST port=$socksPort exitIp=${torManager.currentCircuit.value?.verifiedExitIp ?: "Active"} generation=$generation")
       Result.success(socksPort)
     }

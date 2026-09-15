@@ -141,7 +141,6 @@ object NetworkHardening {
       "browser.cache.memory.enable" to true,
       "browser.cache.memory.capacity" to 16384, // 16MB RAM cache in Ghost mode
       "browser.cache.memory.max_entry_size" to 4096,
-      "network.http.rcwn.enabled" to true, // Race Cache With Network for instant cached loads
       "image.mem.surfacecache.max_size_kb" to 24576,
       "image.mem.decode_bytes_at_a_time" to 32768,
     )
