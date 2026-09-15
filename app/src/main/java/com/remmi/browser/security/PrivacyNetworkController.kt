@@ -8,9 +8,11 @@ import com.remmi.browser.util.DebugLogManager
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoWebExecutor
@@ -170,14 +172,22 @@ class PrivacyNetworkController private constructor(private val context: Context)
         return@withContext Result.success(existingRoute.socksPort ?: 9050)
       }
 
-      // Admission check: reject duplicate concurrent attempts if already in non-shield state
+      // Admission check: if a transition is already underway, wait for it to complete
       if (existingRoute.phase != GhostRoutePhase.SHIELD && existingRoute.phase != GhostRoutePhase.FAILED) {
-        DebugLogManager.log(
-          "[ROUTE] ADMISSION_REJECTED reason=transition_in_progress currentPhase=${existingRoute.phase}"
-        )
-        return@withContext Result.failure(
-          IllegalStateException("Ghost transition already in progress")
-        )
+        val completedRoute = withTimeoutOrNull(45_000L) {
+          CurrentTorRoute.route.first { it.phase == GhostRoutePhase.READY || it.phase == GhostRoutePhase.FAILED }
+        }
+        if (completedRoute?.phase == GhostRoutePhase.READY && CurrentTorRoute.isReady) {
+          DebugLogManager.log("[ROUTE] ADMISSION_JOINED existing ready route port=${completedRoute.socksPort}")
+          return@withContext Result.success(completedRoute.socksPort ?: 9050)
+        } else if (completedRoute?.phase != GhostRoutePhase.FAILED) {
+          DebugLogManager.log(
+            "[ROUTE] ADMISSION_TIMEOUT currentPhase=${CurrentTorRoute.currentPhase}"
+          )
+          return@withContext Result.failure(
+            IllegalStateException("Ghost transition timed out waiting for Tor circuit")
+          )
+        }
       }
 
       if (torManager.isLockedOut()) {

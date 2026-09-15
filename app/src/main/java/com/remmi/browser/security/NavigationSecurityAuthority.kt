@@ -85,29 +85,15 @@ object NavigationSecurityAuthority {
     }
 
     val isOnion = NetworkRouteAuthority.isOnionDestination(trimmed)
-    // Navigation into Ghost/.onion destinations is permitted only after the
-    // route has been cryptographically/state-machine verified as READY. A
-    // merely-started Tor daemon or a non-null SOCKS port is not sufficient.
-    val torReady = CurrentTorRoute.isReady
-    if (isOnion) {
-      if (!isGhost || !torReady) {
-        Log.w(TAG, "Navigation BLOCKED: .onion requested but Ghost/Tor is not verified READY for this tab (isGhost=$isGhost, torReady=$torReady).")
-        return NavigationCheckResult(
-          NavigationDecision.BLOCK,
-          reason = ".onion hidden services require an active Tor (Ghost) tab session."
-        )
-      }
-    } else if (isGhost) {
-      if (!torReady) {
-        Log.w(TAG, "Navigation BLOCKED: Ghost mode requested but Tor daemon is not verified READY (torReady=$torReady).")
-        return NavigationCheckResult(
-          NavigationDecision.BLOCK,
-          reason = "Ghost navigation requires an active Tor connection."
-        )
-      }
+    if (isOnion && !isGhost) {
+      Log.w(TAG, "Navigation BLOCKED: .onion requested but tab is in Clearnet mode (isGhost=false).")
+      return NavigationCheckResult(
+        NavigationDecision.BLOCK,
+        reason = ".onion hidden services require an active Tor (Ghost) tab session."
+      )
     }
 
-    // Sanitize and strictly enforce HTTPS upgrade
+    // Sanitize and strictly enforce HTTPS upgrade (or keep HTTP for onion)
     val sanitized = NetworkHardening.sanitizeUrl(trimmed)
     return NavigationCheckResult(NavigationDecision.ALLOW, sanitizedUrl = sanitized)
   }

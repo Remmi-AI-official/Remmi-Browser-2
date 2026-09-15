@@ -232,11 +232,14 @@ fun RedirectInspectorSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                  modifier = Modifier.weight(1f, fill = false),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
                   Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = when (inspection.status) {
-                      RedirectResolutionStatus.RESOLVED -> ThemeCyber.colors.successGreen.copy(alpha = 0.15f)
+                      RedirectResolutionStatus.RESOLVED -> ThemeCyber.colors.successGreen.copy(alpha = 0.2f)
                       RedirectResolutionStatus.SSRF_BLOCKED, RedirectResolutionStatus.TOR_ROUTE_LOST -> ThemeCyber.colors.dangerRed.copy(alpha = 0.2f)
                       RedirectResolutionStatus.LOOP_DETECTED, RedirectResolutionStatus.TIMEOUT -> ThemeCyber.colors.warningYellow.copy(alpha = 0.2f)
                       else -> ThemeCyber.colors.surfaceLight
@@ -262,23 +265,27 @@ fun RedirectInspectorSheet(
                       fontSize = 10.5.sp,
                       fontFamily = CyberMonoFamily,
                       fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                   }
 
-                  Spacer(modifier = Modifier.width(8.dp))
+                  Spacer(modifier = Modifier.width(6.dp))
 
                   Text(
                     text = if (hasRedirects) "${hops.size - 1} HOPS" else "DIRECT",
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.5.sp,
                     fontFamily = ThemeCyber.fontFamily,
+                    maxLines = 1,
                     color = if (hasRedirects) ThemeCyber.colors.warningYellow else ThemeCyber.colors.textPrimary
                   )
                 }
 
                 Surface(
                   shape = RoundedCornerShape(6.dp),
+                  modifier = Modifier.padding(start = 4.dp),
                   color = when (inspection.riskLevel) {
                     SecurityRiskLevel.BLOCKED, SecurityRiskLevel.HIGH -> ThemeCyber.colors.dangerRed.copy(alpha = 0.15f)
                     SecurityRiskLevel.MEDIUM -> ThemeCyber.colors.warningYellow.copy(alpha = 0.15f)
@@ -286,7 +293,7 @@ fun RedirectInspectorSheet(
                   }
                 ) {
                   Text(
-                    text = "RISK: ${inspection.riskLevel.name} (${inspection.safetyScore}/100)",
+                    text = "RISK: ${inspection.riskLevel.name} (${inspection.safetyScore})",
                     color = when (inspection.riskLevel) {
                       SecurityRiskLevel.BLOCKED, SecurityRiskLevel.HIGH -> ThemeCyber.colors.dangerRed
                       SecurityRiskLevel.MEDIUM -> ThemeCyber.colors.warningYellow
@@ -295,6 +302,7 @@ fun RedirectInspectorSheet(
                     fontSize = 10.sp,
                     fontFamily = CyberMonoFamily,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                   )
                 }
@@ -332,7 +340,9 @@ fun RedirectInspectorSheet(
                   text = inspection.error ?: "Unable to inspect this link safely (${inspection.status.name})",
                   fontSize = 12.sp,
                   fontFamily = CyberMonoFamily,
-                  color = ThemeCyber.colors.textSecondary
+                  color = ThemeCyber.colors.textSecondary,
+                  maxLines = 3,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
 
@@ -354,11 +364,14 @@ fun RedirectInspectorSheet(
                     Icon(Icons.Default.Download, contentDescription = null, tint = ThemeCyber.colors.warningYellow, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                      text = "DOWNLOAD TARGET: .$pathExt file • Domain: ${RedirectInspector.extractDomain(destForDownloadCheck)} • Auto-download stopped",
+                      text = "DOWNLOAD TARGET: .$pathExt • ${RedirectInspector.extractDomain(destForDownloadCheck)}",
                       fontSize = 10.5.sp,
                       fontFamily = CyberMonoFamily,
                       fontWeight = FontWeight.SemiBold,
-                      color = ThemeCyber.colors.warningYellow
+                      color = ThemeCyber.colors.warningYellow,
+                      maxLines = 2,
+                      overflow = TextOverflow.Ellipsis,
+                      modifier = Modifier.weight(1f)
                     )
                   }
                 }
@@ -474,19 +487,25 @@ fun RedirectInspectorSheet(
                   Column(modifier = Modifier.weight(1f)) {
                     Row(
                       modifier = Modifier.fillMaxWidth(),
-                      horizontalArrangement = Arrangement.SpaceBetween
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalAlignment = Alignment.CenterVertically
                     ) {
                       Text(
                         text = "${hop.domain} • ${hop.redirectType}",
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = ThemeCyber.colors.textPrimary
+                        color = ThemeCyber.colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                       )
+                      Spacer(modifier = Modifier.width(6.dp))
                       Text(
                         text = if (hop.statusCode > 0) "${hop.statusCode}" else hop.redirectType,
                         fontSize = 10.5.sp,
                         fontFamily = CyberMonoFamily,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
                         color = if (hop.statusCode in 200..299) ThemeCyber.colors.successGreen
                         else if (hop.statusCode in 300..399) ThemeCyber.colors.warningYellow
                         else ThemeCyber.colors.dangerRed

@@ -122,37 +122,49 @@ fun ClickCandidatesSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                  modifier = Modifier.weight(1f, fill = false),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
                   Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = if (candidate.isOverlay) ThemeCyber.colors.dangerRed.copy(alpha = 0.15f) else ThemeCyber.colors.primary.copy(alpha = 0.15f)
                   ) {
                     Text(
-                      text = if (candidate.isOverlay) "SUSPICIOUS OVERLAY TARGET" else "VISIBLE / INTENDED TARGET",
-                      fontSize = 9.5.sp,
+                      text = if (candidate.isOverlay) "OVERLAY TARGET" else "INTENDED TARGET",
+                      fontSize = 9.sp,
                       fontFamily = CyberMonoFamily,
                       fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
                       color = if (candidate.isOverlay) ThemeCyber.colors.dangerRed else ThemeCyber.colors.primary,
                       modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                   }
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text(
-                    text = candidate.label,
-                    fontFamily = ThemeCyber.fontFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (candidate.isOverlay) ThemeCyber.colors.dangerRed else ThemeCyber.colors.textPrimary
-                  )
+                  if (candidate.label.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = candidate.label,
+                      fontFamily = ThemeCyber.fontFamily,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                      color = if (candidate.isOverlay) ThemeCyber.colors.dangerRed else ThemeCyber.colors.textPrimary,
+                      modifier = Modifier.weight(1f, fill = false)
+                    )
+                  }
                 }
 
                 if (candidate.isTransparent) {
+                  Spacer(modifier = Modifier.width(6.dp))
                   Text(
                     text = "TRANSPARENT",
                     fontSize = 9.sp,
                     fontFamily = CyberMonoFamily,
                     color = ThemeCyber.colors.dangerRed,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                   )
                 }
               }
@@ -174,6 +186,8 @@ fun ClickCandidatesSheet(
                   fontSize = 10.sp,
                   fontFamily = CyberMonoFamily,
                   color = ThemeCyber.colors.textMuted,
+                  maxLines = 2,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(top = 2.dp)
                 )
               }

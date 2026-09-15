@@ -91,7 +91,7 @@ class TorLifecycleManager private constructor(private val context: Context) {
       lifecycleScope.launch(Dispatchers.Main) {
         val geckoEngine = com.remmi.browser.engine.GeckoEngineManager.getInstance(context)
         items.forEach { queued ->
-          geckoEngine.loadUrl(queued.tabId, queued.url, queued.forceReload)
+          geckoEngine.loadUrl(queued.tabId, queued.url, forceReload = true)
         }
       }
     }

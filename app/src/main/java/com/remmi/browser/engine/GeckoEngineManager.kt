@@ -1657,8 +1657,19 @@ class GeckoEngineManager private constructor(private val context: Context) {
         }
 
         val tab = TabManager.getInstance().getTab(tabId)
-        val isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
+        val isOnionDestination = url.contains(".onion", ignoreCase = true) || com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(url)
+        var isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
         
+        // Auto-upgrade clearnet tab to Ghost mode when clicking on a .onion link
+        if (isOnionDestination && !isGhost) {
+          Log.i(TAG, "[ONION_CLICK] .onion link clicked in Clearnet tab; transitioning to Ghost profile and loading via Tor")
+          mainHandler.post {
+            TabManager.getInstance().updateTab(tabId) { it.copy(profile = PrivacyProfile.GHOST) }
+            loadUrl(tabId, url, forceReload = true)
+          }
+          return GeckoResult.fromValue(AllowOrDeny.DENY)
+        }
+
         val check = com.remmi.browser.security.NavigationSecurityAuthority.validateAndSanitizeNavigation(url, isGhost)
         when (check.decision) {
             com.remmi.browser.security.NavigationDecision.BLOCK -> {
@@ -3392,7 +3403,16 @@ class GeckoEngineManager private constructor(private val context: Context) {
   fun loadUrl(tabId: String, url: String, forceReload: Boolean = false) {
     if (url.isBlank()) return
     val tab = TabManager.getInstance().getTab(tabId)
-    val isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
+    val isOnion = url.contains(".onion", ignoreCase = true) || com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(url)
+    var isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
+
+    // Auto-upgrade tab to GHOST profile if .onion is requested in a clearnet tab
+    if (isOnion && !isGhost) {
+      Log.i(TAG, "[ONION_AUTO_GHOST] .onion URL requested for tab=$tabId; transitioning tab to GHOST profile")
+      TabManager.getInstance().updateTab(tabId) { it.copy(profile = PrivacyProfile.GHOST) }
+      isGhost = true
+    }
+
     val check = com.remmi.browser.security.NavigationSecurityAuthority.validateAndSanitizeNavigation(url, isGhost)
     if (check.decision == com.remmi.browser.security.NavigationDecision.BLOCK) {
       Log.w(TAG, "Blocked navigation to '$url' reason: ${check.reason}")
@@ -3424,7 +3444,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val isInFlight = inFlightNavigations.containsKey(tabId)
     val prevDispatched = lastDispatchedUrls[tabId]
     val isAlreadyInFlightSameTarget = isInFlight && inFlightUrl != null && (inFlightUrl == targetUrl || areUrlsEquivalent(inFlightUrl, targetUrl))
-    val isAlreadyDispatchedSameTarget = prevDispatched != null && (prevDispatched == targetUrl || areUrlsEquivalent(prevDispatched, targetUrl))
+    val isAlreadyDispatchedSameTarget = isInFlight && prevDispatched != null && (prevDispatched == targetUrl || areUrlsEquivalent(prevDispatched, targetUrl))
     val isPendingSameTarget = pendingNavigations[tabId]?.let { it.url == targetUrl || areUrlsEquivalent(it.url, targetUrl) } == true
 
     val isActualDuplicate = !forceReload && (isAlreadyInFlightSameTarget || isAlreadyDispatchedSameTarget || isPendingSameTarget) && !isRecoveryActive
@@ -3495,7 +3515,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val isRuntimeReady = (_initState.value == GeckoInitState.READY && (runtime != null || uriLoaderForTest != null))
     val isAttached = isViewAttached(tabId)
     val torLifecycle = com.remmi.browser.security.TorLifecycleManager.getInstance(context)
-    val isTorGateOpen = if (isGhost) torLifecycle.isTorReady.value else true
+    val isTorGateOpen = if (isGhost) (torLifecycle.isTorReady.value || com.remmi.browser.security.CurrentTorRoute.isReady) else true
 
     if (!isRuntimeReady || !isAttached || !isTorGateOpen) {
       val queueMsg = "[FORENSIC] [GECKO_NAV_QUEUE] tabId=$tabId session=$sessId navId=$navId gen=$gen url=$targetUrl thread=$threadName reason=runtimeReady=$isRuntimeReady,attached=$isAttached,torGateOpen=$isTorGateOpen"
@@ -3512,6 +3532,10 @@ class GeckoEngineManager private constructor(private val context: Context) {
             isLoading = true,
             progress = torLifecycle.bootstrapProgress.value.coerceAtLeast(15)
           )
+        }
+        // Ensure Tor daemon bootstrap is initiated if not already running
+        engineScope.launch(Dispatchers.IO) {
+          com.remmi.browser.security.PrivacyNetworkController.getInstance(context).enterGhostMode(tabId)
         }
       }
       return

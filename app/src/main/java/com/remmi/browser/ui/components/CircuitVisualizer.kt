@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remmi.browser.security.CurrentTorRoute
@@ -129,6 +130,9 @@ fun CircuitVisualizerSheet(
             fontFamily = CyberMonoFamily,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
           )
 
           val (badgeText, badgeColor) = when {
@@ -486,7 +490,7 @@ private fun CircuitNodeRow(
 
     Spacer(modifier = Modifier.width(12.dp))
 
-    Column {
+    Column(modifier = Modifier.weight(1f)) {
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           text = "$stepNumber // $nodeType",
@@ -494,6 +498,8 @@ private fun CircuitNodeRow(
           fontFamily = CyberMonoFamily,
           fontSize = 10.sp,
           fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
         )
       }
       Text(
@@ -501,6 +507,8 @@ private fun CircuitNodeRow(
         color = if (isActive) ThemeCyber.colors.textPrimary else ThemeCyber.colors.textMuted,
         fontFamily = CyberMonoFamily,
         fontSize = 11.sp,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis
       )
     }
   }

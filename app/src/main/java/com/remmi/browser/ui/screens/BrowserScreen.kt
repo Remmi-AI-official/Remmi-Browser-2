@@ -811,7 +811,16 @@ fun BrowserScreen(
                     val currentTab = activeTab
                     homeRequestedByTab[currentTab.id] = false
                     backToHomePendingByTab.remove(currentTab.id)
-                    if (currentTab.url == sanitized) {
+                    val isOnion = sanitized.contains(".onion", ignoreCase = true)
+                    if (isOnion && currentTab.profile != PrivacyProfile.GHOST) {
+                      tabManager.updateTab(currentTab.id) {
+                        it.copy(url = sanitized, profile = PrivacyProfile.GHOST, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                      }
+                      if (!CurrentTorRoute.isReady) {
+                        isWaitingForTor = true
+                      }
+                      geckoEngine.loadUrl(currentTab.id, sanitized, forceReload = true)
+                    } else if (currentTab.url == sanitized) {
                       tabManager.updateTab(currentTab.id) { it.copy(isLoading = true, progress = 15) }
                       geckoEngine.reload(currentTab.id)
                     } else {
@@ -919,10 +928,21 @@ fun BrowserScreen(
                   val sanitized = NetworkHardening.sanitizeUrl(target)
                   homeRequestedByTab[activeTab.id] = false
                   backToHomePendingByTab.remove(activeTab.id)
-                  tabManager.updateTab(activeTab.id) {
-                    it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                  val isOnion = sanitized.contains(".onion", ignoreCase = true)
+                  if (isOnion && activeTab.profile != PrivacyProfile.GHOST) {
+                    tabManager.updateTab(activeTab.id) {
+                      it.copy(url = sanitized, profile = PrivacyProfile.GHOST, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                    }
+                    if (!CurrentTorRoute.isReady) {
+                      isWaitingForTor = true
+                    }
+                    geckoEngine.loadUrl(activeTab.id, sanitized, forceReload = true)
+                  } else {
+                    tabManager.updateTab(activeTab.id) {
+                      it.copy(url = sanitized, isReaderMode = false, readerArticle = null, isLoading = true, progress = 15)
+                    }
+                    geckoEngine.loadUrl(activeTab.id, sanitized)
                   }
-                  geckoEngine.loadUrl(activeTab.id, sanitized)
                 },
                 onSelectSearchEngine = { engine ->
                   settingsRepo.updateSearchEngine(engine.displayName)
