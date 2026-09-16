@@ -256,15 +256,19 @@ fun BrowserScreen(
   val torRoute by CurrentTorRoute.route.collectAsState()
   val circuit by torManager.currentCircuit.collectAsState()
   val settings by settingsRepo.settings.collectAsState()
-  val isTorConnected = (torState is TorManager.TorState.READY || torRoute.phase == GhostRoutePhase.READY || torRoute.isGhostActive || CurrentTorRoute.isReady) &&
+  val activeTab = tabs.getOrNull(activeTabIndex) ?: tabs.firstOrNull() ?: BrowserTab()
+
+  val isTorConnected = (torState is TorManager.TorState.READY || CurrentTorRoute.isReady) &&
       torState !is TorManager.TorState.OFF &&
       torState !is TorManager.TorState.FAILED &&
-      torState !is TorManager.TorState.STOPPING
+      torState !is TorManager.TorState.STOPPING &&
+      (activeTab.profile == PrivacyProfile.GHOST || CurrentTorRoute.isGhostActive)
   LaunchedEffect(settings.defaultProfile) {
     tabManager.updateInitialTabProfile(settings.defaultProfile)
   }
   LaunchedEffect(Unit) {
     tabManager.checkAndMarkInactiveTabs(thresholdHours = 24)
+    torManager.checkAndRestoreExistingTorState()
   }
   val historyList by remember(database) {
     database?.historyDao()?.getAllHistory() ?: kotlinx.coroutines.flow.flowOf(emptyList<com.remmi.browser.storage.HistoryItem>())
@@ -279,8 +283,6 @@ fun BrowserScreen(
   val speedDials by settingsRepo.speedDials.collectAsState()
   val savePrompt by autofillHelper.savePrompt.collectAsState()
   val selectPrompt by autofillHelper.selectPrompt.collectAsState()
-
-  val activeTab = tabs.getOrNull(activeTabIndex) ?: tabs.firstOrNull() ?: BrowserTab()
 
   // IMPORTANT: Gecko can briefly report about:blank while a real page is attaching/loading.
   // Rendering NewTabPage directly from tab.url causes a destructive Compose subtree swap

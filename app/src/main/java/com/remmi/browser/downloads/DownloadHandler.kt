@@ -335,10 +335,19 @@ class DownloadHandler(private val context: Context) {
       }
     }
 
-    val uriStr = Uri.parse(url)
-    val rawName = suggestedFilename ?: uriStr.lastPathSegment ?: "remmi_download"
+    val uriStr = try { Uri.parse(url) } catch (_: Throwable) { Uri.EMPTY }
+    val isDataUri = url.startsWith("data:", ignoreCase = true)
+    val isBlobUri = url.startsWith("blob:", ignoreCase = true)
+    val rawName = suggestedFilename ?: if (isDataUri || isBlobUri) {
+      "download_${System.currentTimeMillis()}"
+    } else {
+      uriStr.lastPathSegment ?: "remmi_download"
+    }
     val mime = if (!mimeType.isNullOrBlank() && mimeType != "application/octet-stream") {
       mimeType
+    } else if (isDataUri) {
+      val dataMime = url.substringAfter("data:").substringBefore(";").substringBefore(",")
+      if (dataMime.isNotBlank() && dataMime.contains("/")) dataMime else guessMimeType(rawName, url)
     } else {
       guessMimeType(rawName, url)
     }
@@ -429,6 +438,21 @@ class DownloadHandler(private val context: Context) {
       val inputStream: InputStream = withContext(Dispatchers.IO) {
         if (webResponse != null && webResponse.body != null && startOffset == 0L) {
           webResponse.body!!
+        } else if (url.startsWith("data:", ignoreCase = true)) {
+          val commaIndex = url.indexOf(',')
+          if (commaIndex != -1) {
+            val metadata = url.substring(0, commaIndex)
+            val dataPart = url.substring(commaIndex + 1)
+            val isBase64 = metadata.contains(";base64", ignoreCase = true)
+            val bytes = if (isBase64) {
+              android.util.Base64.decode(dataPart, android.util.Base64.DEFAULT)
+            } else {
+              java.net.URLDecoder.decode(dataPart, "UTF-8").toByteArray(Charsets.UTF_8)
+            }
+            java.io.ByteArrayInputStream(bytes)
+          } else {
+            throw Exception("Malformed data: URI")
+          }
         } else {
           val runtime = com.remmi.browser.engine.GeckoEngineManager.getInstance(context).runtime
             ?: throw Exception("Gecko runtime unavailable")
@@ -741,8 +765,9 @@ class DownloadHandler(private val context: Context) {
       val chosenExt = when {
         !validUrlExt.isNullOrBlank() -> validUrlExt
         !extFromMime.isNullOrBlank() && extFromMime != "bin" -> extFromMime
+        url?.startsWith("data:image/", ignoreCase = true) == true -> "png"
         url?.startsWith("http", ignoreCase = true) == true -> "html"
-        else -> "html"
+        else -> "bin"
       }
       clean = "$clean.$chosenExt"
     }

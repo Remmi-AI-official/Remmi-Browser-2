@@ -147,7 +147,10 @@ class TorManager(private val context: Context) {
         val errorText = intent.getStringExtra(Intent.EXTRA_TEXT) ?: "Tor daemon error"
         Log.e(TAG, "Tor service error broadcast: $errorText")
         DebugLogManager.log("Tor service error broadcast: $errorText")
+        isTorServiceReportedOn = false
         _bootstrapState.value = TorState.FAILED(TorErrorCategory.TOR_SERVICE_START_FAILED, errorText)
+        _currentCircuit.value = null
+        CurrentTorRoute.clearRoute()
         return
       }
 
@@ -174,10 +177,12 @@ class TorManager(private val context: Context) {
             _bootstrapState.value = TorState.STOPPING
           }
           TorService.STATUS_OFF -> {
+            isTorServiceReportedOn = false
             if (intentionalStop) {
               intentionalStop = false
               _bootstrapState.value = TorState.OFF
               _currentCircuit.value = null
+              CurrentTorRoute.clearRoute()
               return
             }
 
@@ -192,6 +197,7 @@ class TorManager(private val context: Context) {
               _bootstrapState.value = TorState.OFF
             }
             _currentCircuit.value = null
+            CurrentTorRoute.clearRoute()
           }
         }
       }
@@ -238,7 +244,16 @@ class TorManager(private val context: Context) {
         isTorServiceReportedOn = true
         CurrentTorRoute.markReady(discoveredPort, existingCircuit.verifiedExitIp, CurrentTorRoute.currentGeneration)
         DebugLogManager.log("[TOR_RESUME] Restored active Tor daemon state on port $discoveredPort")
+        return
       }
+    }
+    // If no running Tor daemon was discovered, ensure Tor state is clean OFF
+    if (_bootstrapState.value !is TorState.TOR_BOOTSTRAPPING && _bootstrapState.value !is TorState.READY) {
+      _bootstrapState.value = TorState.OFF
+      _currentCircuit.value = null
+      isTorServiceReportedOn = false
+      CurrentTorRoute.clearRoute()
+      DebugLogManager.log("[TOR_RESUME] No active Tor daemon detected; confirmed OFF state")
     }
   }
 

@@ -1661,6 +1661,28 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val isOnionDestination = url.contains(".onion", ignoreCase = true) || com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(url)
         var isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
         
+        // Handle client-side data: and blob: downloads (e.g. canvas exports, generated reports) triggered by user action
+        if (url.startsWith("data:", ignoreCase = true) || url.startsWith("blob:", ignoreCase = true)) {
+          val isImageOrMediaOrDoc = url.startsWith("data:image/", ignoreCase = true) ||
+                                    url.startsWith("data:application/", ignoreCase = true) ||
+                                    url.startsWith("data:text/", ignoreCase = true) ||
+                                    url.startsWith("blob:", ignoreCase = true)
+          if (isImageOrMediaOrDoc) {
+            Log.i(TAG, "[CLIENT_DOWNLOAD_INTERCEPT] Intercepting client-generated data/blob download: tabId=$tabId")
+            mainHandler.post {
+              val dlHandler = com.remmi.browser.downloads.DownloadHandler.getInstance(context)
+              val ext = if (url.startsWith("data:image/jpeg", ignoreCase = true)) "jpg" else if (url.startsWith("data:image/png", ignoreCase = true)) "png" else null
+              val defaultName = if (ext != null) "download_${System.currentTimeMillis()}.$ext" else null
+              dlHandler.enqueueDownload(
+                url = url,
+                isGhost = isGhost,
+                suggestedFilename = defaultName
+              )
+            }
+            return GeckoResult.fromValue(AllowOrDeny.DENY)
+          }
+        }
+
         // Auto-upgrade clearnet tab to Ghost mode when clicking on a .onion link
         if (isOnionDestination && !isGhost) {
           Log.i(TAG, "[ONION_CLICK] .onion link clicked in Clearnet tab; transitioning to Ghost profile and loading via Tor")
