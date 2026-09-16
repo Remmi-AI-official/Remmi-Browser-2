@@ -13,9 +13,6 @@ import androidx.activity.result.ActivityResultLauncher
 
 object DefaultBrowserHelper {
 
-  private const val PREFS_NAME = "remmi_browser_prefs"
-  private const val KEY_PROMPT_DISMISSED = "default_browser_prompt_dismissed"
-
   /**
    * Checks whether Remmi is currently configured as the default browser on the device.
    */
@@ -24,16 +21,11 @@ object DefaultBrowserHelper {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         val roleManager = context.getSystemService(Context.ROLE_SERVICE) as? RoleManager
         if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
-          if (roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)) {
-            return true
-          }
+          return roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
         }
       }
 
-      val testIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
-        addCategory(Intent.CATEGORY_BROWSABLE)
-        addCategory(Intent.CATEGORY_DEFAULT)
-      }
+      val testIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.example.com"))
       val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         context.packageManager.resolveActivity(
           testIntent,
@@ -45,29 +37,10 @@ object DefaultBrowserHelper {
       }
 
       val defaultPkg = resolveInfo?.activityInfo?.packageName
-      if (defaultPkg != null && defaultPkg == context.packageName) {
-        return true
-      }
-      false
+      defaultPkg != null && defaultPkg == context.packageName
     } catch (e: Exception) {
       false
     }
-  }
-
-  fun isPromptDismissed(context: Context): Boolean {
-    return try {
-      val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-      prefs.getBoolean(KEY_PROMPT_DISMISSED, false)
-    } catch (_: Exception) {
-      false
-    }
-  }
-
-  fun setPromptDismissed(context: Context, dismissed: Boolean = true) {
-    try {
-      val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-      prefs.edit().putBoolean(KEY_PROMPT_DISMISSED, dismissed).apply()
-    } catch (_: Exception) {}
   }
 
   /**

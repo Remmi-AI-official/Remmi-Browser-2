@@ -1661,40 +1661,6 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val isOnionDestination = url.contains(".onion", ignoreCase = true) || com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(url)
         var isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
         
-        // Handle client-side data: and blob: downloads (e.g. canvas exports, generated reports) triggered by user action
-        if (url.startsWith("data:", ignoreCase = true) || url.startsWith("blob:", ignoreCase = true)) {
-          val isImageOrMediaOrDoc = url.startsWith("data:image/", ignoreCase = true) ||
-                                    url.startsWith("data:application/", ignoreCase = true) ||
-                                    url.startsWith("data:text/", ignoreCase = true) ||
-                                    url.startsWith("blob:", ignoreCase = true)
-          if (isImageOrMediaOrDoc) {
-            Log.i(TAG, "[CLIENT_DOWNLOAD_INTERCEPT] Intercepting client-generated data/blob download: tabId=$tabId")
-            mainHandler.post {
-              val dlHandler = com.remmi.browser.downloads.DownloadHandler.getInstance(context)
-              val (ext, mime) = when {
-                url.startsWith("data:image/jpeg", ignoreCase = true) || url.startsWith("data:image/jpg", ignoreCase = true) -> Pair("jpg", "image/jpeg")
-                url.startsWith("data:image/png", ignoreCase = true) -> Pair("png", "image/png")
-                url.startsWith("data:image/webp", ignoreCase = true) -> Pair("webp", "image/webp")
-                url.startsWith("data:image/gif", ignoreCase = true) -> Pair("gif", "image/gif")
-                url.startsWith("data:image/svg", ignoreCase = true) -> Pair("svg", "image/svg+xml")
-                url.startsWith("data:image/", ignoreCase = true) -> Pair("png", "image/png")
-                url.startsWith("data:application/pdf", ignoreCase = true) -> Pair("pdf", "application/pdf")
-                url.startsWith("data:text/plain", ignoreCase = true) -> Pair("txt", "text/plain")
-                url.startsWith("blob:", ignoreCase = true) -> Pair("png", "image/png")
-                else -> Pair("png", "image/png")
-              }
-              val defaultName = "screenshot_${System.currentTimeMillis()}.$ext"
-              dlHandler.enqueueDownload(
-                url = url,
-                isGhost = isGhost,
-                suggestedFilename = defaultName,
-                mimeType = mime
-              )
-            }
-            return GeckoResult.fromValue(AllowOrDeny.DENY)
-          }
-        }
-
         // Auto-upgrade clearnet tab to Ghost mode when clicking on a .onion link
         if (isOnionDestination && !isGhost) {
           Log.i(TAG, "[ONION_CLICK] .onion link clicked in Clearnet tab; transitioning to Ghost profile and loading via Tor")

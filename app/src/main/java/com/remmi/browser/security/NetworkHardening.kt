@@ -54,13 +54,6 @@ object NetworkHardening {
   }
 
   fun getHardenedPrivacyPreferences(settings: com.remmi.browser.storage.BrowserSettings? = null): Map<String, Any> {
-    val canvasProtect = settings?.canvasFingerprintProtection ?: true
-    val canvasOverrides = if (canvasProtect) {
-      "+AllTargets,-FrameRate"
-    } else {
-      "-CanvasRandomization,-CanvasExtraction,-CanvasImageExtractionPrompt,-CanvasExtractionFromThirdPartiesIsBlocked,-CanvasExtractionBeforeUserInputIsBlocked,-CanvasKeyedPrompt"
-    }
-
     return mapOf(
       "network.trr.mode" to 0, // Completely disable DoH in Tor Mode
       "network.dns.echconfig.enabled" to false, // Let Tor handle exit node encryption
@@ -99,17 +92,16 @@ object NetworkHardening {
       "security.mixed_content.upgrade_display_content" to true,
       "network.dns.echconfig.enabled" to false, // Disabled for Tor remote DNS compatibility
       "network.dns.use_https_rr_as_alpn" to false, // Disabled for Tor remote DNS compatibility
-      "privacy.resistFingerprinting" to false,
+      "privacy.resistFingerprinting" to true,
       "privacy.firstparty.isolate" to (settings?.cookieIsolation ?: true),
-      "privacy.resistFingerprinting.letterboxing" to false,
-      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to canvasProtect,
-      "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to false,
+      "privacy.resistFingerprinting.letterboxing" to true,
+      "privacy.resistFingerprinting.letterboxing.dimensions" to "360x640, 400x700, 480x800, 800x600",
+      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to false,
+      "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to true,
       "privacy.resistFingerprinting.block_mozAddonManager" to true,
       "privacy.resistFingerprinting.randomization.canvas.use_siphash" to false,
       "privacy.resistFingerprinting.randomization.daily_reset.enabled" to false,
       "privacy.resistFingerprinting.randomization.daily_reset.private.enabled" to false,
-      "privacy.fingerprintingProtection" to canvasProtect,
-      "privacy.fingerprintingProtection.overrides" to canvasOverrides,
       "dom.webaudio.enabled" to false,
       "dom.maxHardwareConcurrency" to 2,
       "general.platform.override" to "Linux aarch64",
@@ -162,13 +154,6 @@ object NetworkHardening {
     val trrMode = if (isSystemDns) 5 else 2
     val trrUri = if (isSystemDns) "" else dohProvider.dohUri
 
-    val canvasProtect = settings?.canvasFingerprintProtection ?: true
-    val canvasOverrides = if (canvasProtect) {
-      "+AllTargets,-FrameRate"
-    } else {
-      "-CanvasRandomization,-CanvasExtraction,-CanvasImageExtractionPrompt,-CanvasExtractionFromThirdPartiesIsBlocked,-CanvasExtractionBeforeUserInputIsBlocked,-CanvasKeyedPrompt"
-    }
-
     return mapOf(
       "network.proxy.type" to 0, // Direct connection
       "network.proxy.socks" to "",
@@ -190,8 +175,7 @@ object NetworkHardening {
       "media.peerconnection.enabled" to !(settings?.blockWebRTC ?: true),
       "network.captive-portal-service.enabled" to false,
       "network.http.speculative-parallel-limit" to 2,
-      "privacy.fingerprintingProtection" to canvasProtect,
-      "privacy.fingerprintingProtection.overrides" to canvasOverrides,
+      "privacy.fingerprintingProtection" to (settings?.antiFingerprintingFPP ?: true),
       "privacy.globalprivacycontrol.enabled" to (settings?.globalPrivacyControlEnabled ?: true),
       "privacy.donottrackheader.enabled" to (settings?.doNotTrackEnabled ?: true),
       "network.http.referer.trimmingPolicy" to 2,
@@ -203,8 +187,8 @@ object NetworkHardening {
       "dom.webaudio.enabled" to true,
       "privacy.resistFingerprinting" to false,
       "privacy.resistFingerprinting.letterboxing" to false,
-      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to canvasProtect,
-      "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to false,
+      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to false,
+      "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to true,
       "privacy.resistFingerprinting.block_mozAddonManager" to true,
       "privacy.resistFingerprinting.randomization.canvas.use_siphash" to false,
       "privacy.resistFingerprinting.randomization.daily_reset.enabled" to false,
