@@ -214,6 +214,7 @@ data class BrowserSettings(
   val showRedirectChain: Boolean = true,
   val logPopupEvents: Boolean = true,
   val preserveIntermediateUrls: Boolean = true,
+  val canvasFingerprintProtection: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -291,6 +292,7 @@ class SettingsRepository(private val context: Context) {
       showRedirectChain = prefs.getBoolean("show_redirect_chain", true),
       logPopupEvents = prefs.getBoolean("log_popup_events", true),
       preserveIntermediateUrls = prefs.getBoolean("preserve_intermediate_urls", true),
+      canvasFingerprintProtection = prefs.getBoolean("canvas_fingerprint_protection", true),
     )
   }
 
@@ -551,6 +553,14 @@ class SettingsRepository(private val context: Context) {
   fun updatePreserveIntermediateUrls(enabled: Boolean) {
     prefs.edit().putBoolean("preserve_intermediate_urls", enabled).apply()
     _settings.value = _settings.value.copy(preserveIntermediateUrls = enabled)
+  }
+
+  fun updateCanvasFingerprintProtection(enabled: Boolean) {
+    prefs.edit().putBoolean("canvas_fingerprint_protection", enabled).apply()
+    _settings.value = _settings.value.copy(canvasFingerprintProtection = enabled)
+    try {
+      com.remmi.browser.engine.GeckoEngineManager.getInstance(context).updateGlobalPreferences(_settings.value)
+    } catch (_: Exception) {}
   }
 
   companion object {

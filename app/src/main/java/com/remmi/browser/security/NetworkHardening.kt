@@ -54,6 +54,13 @@ object NetworkHardening {
   }
 
   fun getHardenedPrivacyPreferences(settings: com.remmi.browser.storage.BrowserSettings? = null): Map<String, Any> {
+    val canvasProtect = settings?.canvasFingerprintProtection ?: true
+    val canvasOverrides = if (canvasProtect) {
+      "+AllTargets,-FrameRate"
+    } else {
+      "-CanvasRandomization,-CanvasExtraction,-CanvasImageExtractionPrompt,-CanvasExtractionFromThirdPartiesIsBlocked,-CanvasExtractionBeforeUserInputIsBlocked,-CanvasKeyedPrompt"
+    }
+
     return mapOf(
       "network.trr.mode" to 0, // Completely disable DoH in Tor Mode
       "network.dns.echconfig.enabled" to false, // Let Tor handle exit node encryption
@@ -95,14 +102,14 @@ object NetworkHardening {
       "privacy.resistFingerprinting" to false,
       "privacy.firstparty.isolate" to (settings?.cookieIsolation ?: true),
       "privacy.resistFingerprinting.letterboxing" to false,
-      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to false,
+      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to canvasProtect,
       "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to false,
       "privacy.resistFingerprinting.block_mozAddonManager" to true,
       "privacy.resistFingerprinting.randomization.canvas.use_siphash" to false,
       "privacy.resistFingerprinting.randomization.daily_reset.enabled" to false,
       "privacy.resistFingerprinting.randomization.daily_reset.private.enabled" to false,
-      "privacy.fingerprintingProtection" to false,
-      "privacy.fingerprintingProtection.overrides" to "-CanvasRandomization,-CanvasExtraction,-CanvasImageExtractionPrompt,-CanvasExtractionFromThirdPartiesIsBlocked,-CanvasExtractionBeforeUserInputIsBlocked,-CanvasKeyedPrompt",
+      "privacy.fingerprintingProtection" to canvasProtect,
+      "privacy.fingerprintingProtection.overrides" to canvasOverrides,
       "dom.webaudio.enabled" to false,
       "dom.maxHardwareConcurrency" to 2,
       "general.platform.override" to "Linux aarch64",
@@ -155,6 +162,13 @@ object NetworkHardening {
     val trrMode = if (isSystemDns) 5 else 2
     val trrUri = if (isSystemDns) "" else dohProvider.dohUri
 
+    val canvasProtect = settings?.canvasFingerprintProtection ?: true
+    val canvasOverrides = if (canvasProtect) {
+      "+AllTargets,-FrameRate"
+    } else {
+      "-CanvasRandomization,-CanvasExtraction,-CanvasImageExtractionPrompt,-CanvasExtractionFromThirdPartiesIsBlocked,-CanvasExtractionBeforeUserInputIsBlocked,-CanvasKeyedPrompt"
+    }
+
     return mapOf(
       "network.proxy.type" to 0, // Direct connection
       "network.proxy.socks" to "",
@@ -176,8 +190,8 @@ object NetworkHardening {
       "media.peerconnection.enabled" to !(settings?.blockWebRTC ?: true),
       "network.captive-portal-service.enabled" to false,
       "network.http.speculative-parallel-limit" to 2,
-      "privacy.fingerprintingProtection" to false,
-      "privacy.fingerprintingProtection.overrides" to "-CanvasRandomization,-CanvasExtraction,-CanvasImageExtractionPrompt,-CanvasExtractionFromThirdPartiesIsBlocked,-CanvasExtractionBeforeUserInputIsBlocked,-CanvasKeyedPrompt",
+      "privacy.fingerprintingProtection" to canvasProtect,
+      "privacy.fingerprintingProtection.overrides" to canvasOverrides,
       "privacy.globalprivacycontrol.enabled" to (settings?.globalPrivacyControlEnabled ?: true),
       "privacy.donottrackheader.enabled" to (settings?.doNotTrackEnabled ?: true),
       "network.http.referer.trimmingPolicy" to 2,
@@ -189,7 +203,7 @@ object NetworkHardening {
       "dom.webaudio.enabled" to true,
       "privacy.resistFingerprinting" to false,
       "privacy.resistFingerprinting.letterboxing" to false,
-      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to false,
+      "privacy.resistFingerprinting.randomDataOnCanvasExtract" to canvasProtect,
       "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to false,
       "privacy.resistFingerprinting.block_mozAddonManager" to true,
       "privacy.resistFingerprinting.randomization.canvas.use_siphash" to false,

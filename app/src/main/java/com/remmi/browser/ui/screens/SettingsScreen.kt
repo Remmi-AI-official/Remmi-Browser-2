@@ -1955,6 +1955,22 @@ private fun PrivacySecuritySubScreen(
 
     item {
       SubScreenToggleCard(
+        icon = Icons.Default.Fingerprint,
+        title = "Canvas Fingerprint Protection",
+        subtitle = "Injects cryptographic noise into HTML5 canvas to block tracking scripts. Disable temporarily if webpage screenshot exports appear striped.",
+        checked = settings.canvasFingerprintProtection,
+        onCheckedChange = { settingsRepo.updateCanvasFingerprintProtection(it) },
+        badgeBg = greenBg,
+        iconTint = greenTint,
+        cardBg = cardBg,
+        cardBorder = cardBorder,
+        textPrimary = textPrimary,
+        textSecondary = textSecondary
+      )
+    }
+
+    item {
+      SubScreenToggleCard(
         icon = Icons.Default.Shield,
         title = "HTTPS-Only Network Enforcement",
         subtitle = "Strictly upgrade all requests to TLS. Insecure HTTP connections are dropped immediately.",
