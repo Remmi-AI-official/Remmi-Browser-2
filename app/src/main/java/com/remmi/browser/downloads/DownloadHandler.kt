@@ -620,12 +620,12 @@ class DownloadHandler(private val context: Context) {
         FileProvider.getUriForFile(
           context,
           "${context.packageName}.fileprovider",
-          File(dir, fileName)
+          File(dir, effectiveFileName)
         )
       }
 
       val openIntent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(viewUri, mime)
+        setDataAndType(viewUri, effectiveMime)
         flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
       }
       val pendingIntent = PendingIntent.getActivity(
@@ -641,7 +641,7 @@ class DownloadHandler(private val context: Context) {
       // Post complete notification to Completed channel
       val completionNotif = NotificationCompat.Builder(context, CHANNEL_ID_COMPLETE)
         .setContentTitle("Download Complete")
-        .setContentText("$fileName (${formatBytes(downloadedBytes)}) • Tap to open")
+        .setContentText("$effectiveFileName (${formatBytes(downloadedBytes)}) • Tap to open")
         .setSmallIcon(R.drawable.ic_check)
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         .setProgress(0, 0, false)
@@ -656,12 +656,14 @@ class DownloadHandler(private val context: Context) {
       activeJobs.remove(downloadId)
       downloadSessions.remove(downloadId)
 
+      val finalFileType = DownloadFileType.fromMimeOrFilename(effectiveMime, effectiveFileName)
+
       db.downloadDao().insert(
         DownloadItem(
           downloadId = downloadId,
-          fileName = fileName,
+          fileName = effectiveFileName,
           url = url,
-          mimeType = mime,
+          mimeType = effectiveMime,
           fileSize = downloadedBytes,
           status = "COMPLETED",
           filePath = targetUri.toString(),
@@ -672,10 +674,10 @@ class DownloadHandler(private val context: Context) {
       _downloadEvents.emit(
         DownloadEvent.Completed(
           downloadId = downloadId,
-          fileName = fileName,
+          fileName = effectiveFileName,
           fileSize = downloadedBytes,
           filePath = targetUri.toString(),
-          fileType = fileType
+          fileType = finalFileType
         )
       )
 

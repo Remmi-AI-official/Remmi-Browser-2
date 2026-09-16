@@ -191,9 +191,10 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("""user_pref("network.dns.echconfig.enabled", false); // Let Tor handle exit node encryption""")
       appendLine()
       appendLine("// Anti-Fingerprinting (Tor Standard RFP + Canvas Protection + Letterboxing)")
-      appendLine("""user_pref("privacy.resistFingerprinting", true);""")
-      appendLine("""user_pref("privacy.resistFingerprinting.letterboxing", true);""")
-      appendLine("""user_pref("privacy.resistFingerprinting.letterboxing.dimensions", "360x640, 400x700, 480x800, 800x600");""")
+      appendLine("""user_pref("privacy.resistFingerprinting", false);""")
+      appendLine("""user_pref("privacy.resistFingerprinting.letterboxing", false);""")
+      appendLine("""user_pref("privacy.fingerprintingProtection", true);""")
+      appendLine("""user_pref("privacy.fingerprintingProtection.overrides", "+AllTargets,-FrameRate");""")
       appendLine("""user_pref("privacy.resistFingerprinting.randomDataOnCanvasExtract", false); // Fix 100% unique paradox""")
       appendLine("""user_pref("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts", false); // Allow user canvas interactions""")
       appendLine("""user_pref("privacy.resistFingerprinting.block_mozAddonManager", true);""")
@@ -482,7 +483,6 @@ class ProfileConfigManager(private val context: Context) {
       Mode.TOR -> {
         content.contains("network.proxy.type") &&
         content.contains("network.proxy.socks_remote_dns") &&
-        content.contains("privacy.resistFingerprinting.letterboxing") &&
         content.contains("dom.maxHardwareConcurrency") &&
         content.contains("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts") &&
         !content.contains("gfx.webrender.all") &&
