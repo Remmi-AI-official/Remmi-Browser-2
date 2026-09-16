@@ -2285,26 +2285,11 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
         val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
 
-        // 1. Security / Certificate errors (category 2):
-        // In GeckoView, returning about:certerror instructs Gecko to display its native certificate warning page.
-        // With security.certerror.hideAddException=false, security.certerrors.permanentOverride=true,
-        // and dom.securecontext.allowlist_onions=true, Gecko provides the "Advanced" -> "Accept the Risk and Continue" button,
-        // which calls document.addCertException() with internal privileges and reloads the page.
-        // Returning null aborts navigation. Returning about:certerror provides the full interactive exception flow.
-        if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY) {
-          Log.i(TAG, "Security/Certificate error for uri=$targetUrl (category=${error.category}, code=${error.code}). Displaying native certificate override UI.")
-          val encoded = try {
-            java.net.URLEncoder.encode(targetUrl, "UTF-8")
-          } catch (_: Exception) {
-            targetUrl
-          }
-          return GeckoResult.fromValue("about:certerror?e=nssBadCert&u=$encoded")
-        }
-
-        // 2. Onion HTTPS fallback: if connection failed on port 443 (refused, timed out, reset, or interrupt)
-        // and only attempt fallback once per targetUrl to avoid redirect loops.
+        // 1. Onion HTTPS fallback: if connection failed on HTTPS (security/cert error, refused, timed out, reset, or interrupt)
+        // attempt single fallback to HTTP to avoid redirect loops, since hidden services are natively encrypted by Tor.
         if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion &&
-            (error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
+            (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY ||
+             error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
              error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
              error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
              error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT)
@@ -2312,7 +2297,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
           if (!onionFallbackAttempts.contains(targetUrl)) {
             onionFallbackAttempts.add(targetUrl)
             val fallbackHttpUrl = "http://" + targetUrl.substring(8)
-            Log.i(TAG, "Onion HTTPS port connection failed (code=${error.code}); single fallback to HTTP: $fallbackHttpUrl")
+            Log.i(TAG, "Onion HTTPS port connection failed (code=${error.code}, category=${error.category}); single fallback to HTTP: $fallbackHttpUrl")
             CoroutineScope(Dispatchers.Main.immediate).launch {
               loadUrl(tabId, fallbackHttpUrl)
             }
@@ -2320,13 +2305,14 @@ class GeckoEngineManager private constructor(private val context: Context) {
           }
         }
 
-        val errorCodeString = when (error.code) {
-          org.mozilla.geckoview.WebRequestError.ERROR_UNKNOWN_HOST -> "ERR_NAME_NOT_RESOLVED"
-          org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED -> "ERR_CONNECTION_REFUSED"
-          org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT -> "ERR_TIMED_OUT"
-          org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET -> "ERR_CONNECTION_RESET"
-          org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT -> "ERR_CONNECTION_CLOSED"
-          org.mozilla.geckoview.WebRequestError.ERROR_PROXY_CONNECTION_REFUSED -> "ERR_PROXY_CONNECTION_FAILED"
+        val errorCodeString = when {
+          error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY -> "ERR_CERT_COMMON_NAME_INVALID"
+          error.code == org.mozilla.geckoview.WebRequestError.ERROR_UNKNOWN_HOST -> "ERR_NAME_NOT_RESOLVED"
+          error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED -> "ERR_CONNECTION_REFUSED"
+          error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT -> "ERR_TIMED_OUT"
+          error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET -> "ERR_CONNECTION_RESET"
+          error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT -> "ERR_CONNECTION_CLOSED"
+          error.code == org.mozilla.geckoview.WebRequestError.ERROR_PROXY_CONNECTION_REFUSED -> "ERR_PROXY_CONNECTION_FAILED"
           else -> if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_NETWORK) "ERR_INTERNET_DISCONNECTED" else "ERR_CONNECTION_FAILED (${error.code})"
         }
 
