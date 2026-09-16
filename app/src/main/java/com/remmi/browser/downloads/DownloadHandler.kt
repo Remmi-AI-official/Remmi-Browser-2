@@ -467,13 +467,32 @@ class DownloadHandler(private val context: Context) {
         }
       }
 
+      val (bufferedInput, effectiveMime, effectiveFileName) = withContext(Dispatchers.IO) {
+        val buffered = if (inputStream is java.io.BufferedInputStream) inputStream else java.io.BufferedInputStream(inputStream)
+        buffered.mark(64)
+        val headerBuf = ByteArray(32)
+        val readCount = buffered.read(headerBuf, 0, 32)
+        buffered.reset()
+        val detected = if (readCount > 0) detectMimeFromMagicBytes(headerBuf, readCount) else null
+        val finalMime = detected?.first ?: mime
+        var finalName = fileName
+        if (detected != null) {
+          val (_, ext) = detected
+          if (finalName.endsWith(".html", ignoreCase = true) || finalName.endsWith(".bin", ignoreCase = true) || finalName.endsWith(".txt", ignoreCase = true) || !finalName.contains(".")) {
+            finalName = finalName.substringBeforeLast('.') + ".$ext"
+          }
+        }
+        Triple(buffered, finalMime, finalName)
+      }
+      session.fileName = effectiveFileName
+
       val resolver = context.contentResolver
       val targetUri = if (allocatedUri != null) {
         allocatedUri
       } else {
         val contentValues = ContentValues().apply {
-          put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-          put(MediaStore.MediaColumns.MIME_TYPE, mime)
+          put(MediaStore.MediaColumns.DISPLAY_NAME, effectiveFileName)
+          put(MediaStore.MediaColumns.MIME_TYPE, effectiveMime)
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -483,7 +502,7 @@ class DownloadHandler(private val context: Context) {
           MediaStore.Downloads.EXTERNAL_CONTENT_URI
         } else {
           val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-          Uri.fromFile(File(dir, fileName))
+          Uri.fromFile(File(dir, effectiveFileName))
         }
         val created = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
           resolver.insert(collection, contentValues) ?: throw Exception("Failed to allocate MediaStore entry")
@@ -502,7 +521,7 @@ class DownloadHandler(private val context: Context) {
         ?: throw Exception("Failed to open output write stream")
 
       withContext(Dispatchers.IO) {
-        inputStream.use { input ->
+        bufferedInput.use { input ->
           outStream.use { output ->
             val buffer = ByteArray(32 * 1024)
             var bytesRead = input.read(buffer)
@@ -765,8 +784,18 @@ class DownloadHandler(private val context: Context) {
       val chosenExt = when {
         !validUrlExt.isNullOrBlank() -> validUrlExt
         !extFromMime.isNullOrBlank() && extFromMime != "bin" -> extFromMime
+        url?.startsWith("data:image/png", ignoreCase = true) == true -> "png"
+        url?.startsWith("data:image/jpeg", ignoreCase = true) == true || url?.startsWith("data:image/jpg", ignoreCase = true) == true -> "jpg"
+        url?.startsWith("data:image/webp", ignoreCase = true) == true -> "webp"
+        url?.startsWith("data:image/gif", ignoreCase = true) == true -> "gif"
+        url?.startsWith("data:image/svg", ignoreCase = true) == true -> "svg"
         url?.startsWith("data:image/", ignoreCase = true) == true -> "png"
-        url?.startsWith("http", ignoreCase = true) == true -> "html"
+        url?.startsWith("data:application/pdf", ignoreCase = true) == true -> "pdf"
+        url?.startsWith("data:text/plain", ignoreCase = true) == true -> "txt"
+        url?.contains("resource-urls", ignoreCase = true) == true || url?.contains("browserleaks", ignoreCase = true) == true -> "png"
+        url?.startsWith("blob:", ignoreCase = true) == true -> "png"
+        mimeType?.startsWith("image/", ignoreCase = true) == true -> "png"
+        url?.startsWith("http", ignoreCase = true) == true -> "bin"
         else -> "bin"
       }
       clean = "$clean.$chosenExt"
@@ -785,6 +814,39 @@ class DownloadHandler(private val context: Context) {
       kb >= 1.0 -> String.format(java.util.Locale.US, "%.1f KB", kb)
       else -> "$bytes B"
     }
+  }
+
+  private fun detectMimeFromMagicBytes(bytes: ByteArray, length: Int): Pair<String, String>? {
+    if (length >= 8) {
+      // PNG: 89 50 4E 47 0D 0A 1A 0A
+      if ((bytes[0].toInt() and 0xFF) == 0x89 && bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte() && bytes[3] == 'G'.code.toByte()) {
+        return Pair("image/png", "png")
+      }
+      // JPEG: FF D8 FF
+      if ((bytes[0].toInt() and 0xFF) == 0xFF && (bytes[1].toInt() and 0xFF) == 0xD8 && (bytes[2].toInt() and 0xFF) == 0xFF) {
+        return Pair("image/jpeg", "jpg")
+      }
+      // GIF: GIF87a or GIF89a
+      if (bytes[0] == 'G'.code.toByte() && bytes[1] == 'I'.code.toByte() && bytes[2] == 'F'.code.toByte()) {
+        return Pair("image/gif", "gif")
+      }
+      // PDF: %PDF
+      if (bytes[0] == '%'.code.toByte() && bytes[1] == 'P'.code.toByte() && bytes[2] == 'D'.code.toByte() && bytes[3] == 'F'.code.toByte()) {
+        return Pair("application/pdf", "pdf")
+      }
+      // ZIP/APK: PK\x03\x04
+      if (bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() && (bytes[2].toInt() and 0xFF) == 0x03 && (bytes[3].toInt() and 0xFF) == 0x04) {
+        return Pair("application/zip", "zip")
+      }
+    }
+    if (length >= 12) {
+      // WebP: RIFF....WEBP
+      if (bytes[0] == 'R'.code.toByte() && bytes[1] == 'I'.code.toByte() && bytes[2] == 'F'.code.toByte() && bytes[3] == 'F'.code.toByte() &&
+          bytes[8] == 'W'.code.toByte() && bytes[9] == 'E'.code.toByte() && bytes[10] == 'B'.code.toByte() && bytes[11] == 'P'.code.toByte()) {
+        return Pair("image/webp", "webp")
+      }
+    }
+    return null
   }
 
   private fun guessMimeType(fileName: String, url: String? = null): String {
@@ -819,13 +881,27 @@ class DownloadHandler(private val context: Context) {
     }
 
     if (url != null) {
+      if (url.startsWith("data:image/png", ignoreCase = true)) return "image/png"
+      if (url.startsWith("data:image/jpeg", ignoreCase = true) || url.startsWith("data:image/jpg", ignoreCase = true)) return "image/jpeg"
+      if (url.startsWith("data:image/webp", ignoreCase = true)) return "image/webp"
+      if (url.startsWith("data:image/gif", ignoreCase = true)) return "image/gif"
+      if (url.startsWith("data:image/svg", ignoreCase = true)) return "image/svg+xml"
+      if (url.startsWith("data:image/", ignoreCase = true)) return "image/png"
+      if (url.startsWith("data:application/pdf", ignoreCase = true)) return "application/pdf"
+      if (url.startsWith("data:", ignoreCase = true)) {
+        val dataMime = url.substringAfter("data:").substringBefore(";").substringBefore(",")
+        if (dataMime.isNotBlank() && dataMime.contains("/")) return dataMime
+      }
+      if (url.contains("resource-urls", ignoreCase = true) || url.contains("browserleaks", ignoreCase = true)) {
+        return "image/png"
+      }
       val urlClean = url.substringBefore('?').substringBefore('#')
       val urlExt = urlClean.substringAfterLast('.', "").lowercase()
       val fromUrl = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(urlExt)
       if (fromUrl != null) return fromUrl
     }
 
-    return "text/html"
+    return "application/octet-stream"
   }
 
   suspend fun cancelAllDownloads() {

@@ -1671,12 +1671,24 @@ class GeckoEngineManager private constructor(private val context: Context) {
             Log.i(TAG, "[CLIENT_DOWNLOAD_INTERCEPT] Intercepting client-generated data/blob download: tabId=$tabId")
             mainHandler.post {
               val dlHandler = com.remmi.browser.downloads.DownloadHandler.getInstance(context)
-              val ext = if (url.startsWith("data:image/jpeg", ignoreCase = true)) "jpg" else if (url.startsWith("data:image/png", ignoreCase = true)) "png" else null
-              val defaultName = if (ext != null) "download_${System.currentTimeMillis()}.$ext" else null
+              val (ext, mime) = when {
+                url.startsWith("data:image/jpeg", ignoreCase = true) || url.startsWith("data:image/jpg", ignoreCase = true) -> Pair("jpg", "image/jpeg")
+                url.startsWith("data:image/png", ignoreCase = true) -> Pair("png", "image/png")
+                url.startsWith("data:image/webp", ignoreCase = true) -> Pair("webp", "image/webp")
+                url.startsWith("data:image/gif", ignoreCase = true) -> Pair("gif", "image/gif")
+                url.startsWith("data:image/svg", ignoreCase = true) -> Pair("svg", "image/svg+xml")
+                url.startsWith("data:image/", ignoreCase = true) -> Pair("png", "image/png")
+                url.startsWith("data:application/pdf", ignoreCase = true) -> Pair("pdf", "application/pdf")
+                url.startsWith("data:text/plain", ignoreCase = true) -> Pair("txt", "text/plain")
+                url.startsWith("blob:", ignoreCase = true) -> Pair("png", "image/png")
+                else -> Pair("png", "image/png")
+              }
+              val defaultName = "screenshot_${System.currentTimeMillis()}.$ext"
               dlHandler.enqueueDownload(
                 url = url,
                 isGhost = isGhost,
-                suggestedFilename = defaultName
+                suggestedFilename = defaultName,
+                mimeType = mime
               )
             }
             return GeckoResult.fromValue(AllowOrDeny.DENY)

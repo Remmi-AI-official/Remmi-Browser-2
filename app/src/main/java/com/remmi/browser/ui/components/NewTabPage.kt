@@ -164,7 +164,9 @@ fun NewTabPage(
   var isDefaultBrowser by remember {
     mutableStateOf(true)
   }
-  var isDefaultPromptDismissed by rememberSaveable { mutableStateOf(false) }
+  var isDefaultPromptDismissed by remember {
+    mutableStateOf(DefaultBrowserHelper.isPromptDismissed(context))
+  }
 
   LaunchedEffect(Unit) {
     val isDef = withContext(Dispatchers.IO) {
@@ -180,6 +182,10 @@ fun NewTabPage(
       val isDef = DefaultBrowserHelper.isDefaultBrowser(context)
       withContext(Dispatchers.Main) {
         isDefaultBrowser = isDef
+        if (isDef) {
+          DefaultBrowserHelper.setPromptDismissed(context, true)
+          isDefaultPromptDismissed = true
+        }
       }
     }
   }
@@ -190,8 +196,12 @@ fun NewTabPage(
       if (event == Lifecycle.Event.ON_RESUME) {
         scope.launch(Dispatchers.IO) {
           val isDef = DefaultBrowserHelper.isDefaultBrowser(context)
+          val isDismissed = DefaultBrowserHelper.isPromptDismissed(context)
           withContext(Dispatchers.Main) {
             isDefaultBrowser = isDef
+            if (isDef || isDismissed) {
+              isDefaultPromptDismissed = true
+            }
           }
         }
       }
@@ -617,7 +627,10 @@ fun NewTabPage(
               }
 
               IconButton(
-                onClick = { isDefaultPromptDismissed = true },
+                onClick = {
+                  isDefaultPromptDismissed = true
+                  DefaultBrowserHelper.setPromptDismissed(context, true)
+                },
                 modifier = Modifier.size(24.dp)
               ) {
                 Icon(
