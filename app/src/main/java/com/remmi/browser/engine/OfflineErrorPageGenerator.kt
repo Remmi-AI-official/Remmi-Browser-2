@@ -36,8 +36,17 @@ object OfflineErrorPageGenerator {
     val buttonBg = if (isOnion) "#9333ea" else "#2563eb"
     val buttonText = "#ffffff"
 
-    val title = if (isOnion) "Onion Site Unreachable" else "You're not connected"
-    val subtitle = if (isOnion) {
+    val isV2Onion = isOnion && (host.endsWith(".onion", ignoreCase = true) && host.substringBefore(".onion").length == 16)
+    val title = if (isV2Onion) {
+      "V2 Onion Deprecated"
+    } else if (isOnion) {
+      "Onion Site Unreachable"
+    } else {
+      "You're not connected"
+    }
+    val subtitle = if (isV2Onion) {
+      "<strong>$escapedHost</strong> is an obsolete 16-character v2 Onion service. The Tor network permanently retired v2 services in 2021. Please use the modern 56-character v3 .onion address."
+    } else if (isOnion) {
       "Could not establish a secure circuit to <strong>$escapedHost</strong> over the Tor network."
     } else {
       "And the web just isn't the same without you. Let's get you back online!"
@@ -213,7 +222,10 @@ object OfflineErrorPageGenerator {
     <div class="try-box">
       <strong>${if (isOnion) "Tor Onion Diagnosis:" else "Try:"}</strong>
       <ul class="try-list">
-        ${if (isOnion) """
+        ${if (isV2Onion) """
+        <li>v2 onion domains (.onion with 16 characters) are deprecated and no longer routable on the Tor network.</li>
+        <li>Search for the site's official 56-character v3 .onion link.</li>
+        """ else if (isOnion) """
         <li>Onion hidden services can take 15-30 seconds to establish circuits.</li>
         <li>The onion host may be temporarily offline or under heavy traffic.</li>
         ${if (httpFallbackUrl != null) "<li>Hidden services are natively encrypted by Tor; HTTPS is often not configured.</li>" else ""}
