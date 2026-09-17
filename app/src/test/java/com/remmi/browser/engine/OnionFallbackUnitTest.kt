@@ -30,4 +30,13 @@ class OnionFallbackUnitTest {
         assertTrue(dataUri.startsWith("data:text/html;charset=utf-8,"))
         assertTrue(dataUri.contains("digdig2nugjpszzmqe5ep2bk7lqfpdlyrkojsx2j6kzalnrqtwedr3id.onion"))
     }
+
+    @Test
+    fun testCertErrorUriGeneration() {
+        val targetUrl = "https://digdig2nugjpszzmqe5ep2bk7lqfpdlyrkojsx2j6kzalnrqtwedr3id.onion/chat/ee6500c4#c"
+        val encodedTarget = java.net.URLEncoder.encode(targetUrl, "UTF-8")
+        val certErrorUri = "about:certerror?e=nssBadCert&u=$encodedTarget"
+        assertTrue(certErrorUri.startsWith("about:certerror?e=nssBadCert&u="))
+        assertTrue(certErrorUri.contains("digdig2nugjpszzmqe5ep2bk7lqfpdlyrkojsx2j6kzalnrqtwedr3id.onion"))
+    }
 }

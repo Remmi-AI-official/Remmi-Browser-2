@@ -96,7 +96,7 @@ object NetworkHardening {
       "security.tls.version.enable-deprecated" to true,
       "security.ssl.treat_unsafe_negotiation_as_broken" to false,
       "security.pki.sha1_enforcement_level" to 0,
-      "security.pki.name_matching_mode" to 3,
+      "security.pki.name_matching_mode" to 0, // Allow Subject Common Name fallback for .onion certs
       "security.pki.crlite_mode" to 0,
       "security.pki.distrust_ca_policy" to 0,
       "security.ssl.errorReporting.automatic" to false,

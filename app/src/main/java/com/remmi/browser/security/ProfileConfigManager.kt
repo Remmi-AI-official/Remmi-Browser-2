@@ -235,7 +235,7 @@ class ProfileConfigManager(private val context: Context) {
       appendLine("""user_pref("security.mixed_content.block_active_content", false);""")
       appendLine("""user_pref("security.mixed_content.upgrade_display_content", false);""")
       appendLine("""user_pref("security.pki.sha1_enforcement_level", 0);""")
-      appendLine("""user_pref("security.pki.name_matching_mode", 3);""")
+      appendLine("""user_pref("security.pki.name_matching_mode", 0);""") // Allow Subject Common Name fallback for .onion certs
       appendLine("""user_pref("security.pki.crlite_mode", 0);""")
       appendLine("""user_pref("security.pki.distrust_ca_policy", 0);""")
       appendLine("""user_pref("security.ssl.errorReporting.automatic", false);""")
