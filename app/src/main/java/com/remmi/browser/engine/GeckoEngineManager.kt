@@ -2285,32 +2285,36 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
         val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
 
-        // 1. Certificate / Security Error:
-        // Return null so GeckoView displays its native about:certerror page.
-        // This is critical because only the native about:certerror chrome page has privileged
-        // access to add certificate exceptions ("Advanced -> Accept the Risk and Continue") into NSS.
-        // A custom data: URI cannot override certificate security.
-        if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY) {
-          Log.i(TAG, "Security/certificate error for $targetUrl (code=${error.code}); delegating to native GeckoView about:certerror")
-          return null
-        }
+        // 1. Onion HTTPS fallback:
+        // Tor onion hidden services are end-to-end encrypted and cryptographically authenticated
+        // by the Tor protocol itself. Almost all .onion services run exclusively on plain HTTP (port 80).
+        // If an onion service was loaded with https:// and fails for ANY reason (bad/self-signed SSL certificate,
+        // SSL negotiation failure, connection refused, port 443 closed, timeout, or reset), automatically
+        // fall back to http:// (port 80) over Tor, exactly as Tor Browser behaves.
+        if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion) {
+          val isSslOrCertError = error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY ||
+                                 error.code == org.mozilla.geckoview.WebRequestError.ERROR_SECURITY_BAD_CERT ||
+                                 error.code == org.mozilla.geckoview.WebRequestError.ERROR_SECURITY_SSL ||
+                                 error.code == org.mozilla.geckoview.WebRequestError.ERROR_BAD_HSTS_CERT
+          val isConnectionError = error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_UNKNOWN_SOCKET_TYPE ||
+                                  error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_NETWORK
 
-        // 2. Onion HTTPS unreachable fallback: if connection failed on HTTPS because port 443 is unreachable
-        // (connection refused, timed out, reset, or interrupted), attempt single fallback to HTTP port 80.
-        if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion &&
-            (error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
-             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
-             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
-             error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT)
-        ) {
-          if (!onionFallbackAttempts.contains(targetUrl)) {
-            onionFallbackAttempts.add(targetUrl)
-            val fallbackHttpUrl = "http://" + targetUrl.substring(8)
-            Log.i(TAG, "Onion HTTPS port unreachable (code=${error.code}); falling back to HTTP: $fallbackHttpUrl")
-            CoroutineScope(Dispatchers.Main.immediate).launch {
-              loadUrl(tabId, fallbackHttpUrl, forceReload = true)
+          if (isSslOrCertError || isConnectionError) {
+            if (!onionFallbackAttempts.contains(targetUrl)) {
+              onionFallbackAttempts.add(targetUrl)
+              val fallbackHttpUrl = "http://" + targetUrl.substring(8)
+              val fallbackReason = if (isSslOrCertError) "certificate/SSL error (${error.code})" else "unreachable port 443 (${error.code})"
+              Log.i(TAG, "[ONION_FALLBACK] Onion HTTPS failed ($fallbackReason); falling back to HTTP: $fallbackHttpUrl")
+              com.remmi.browser.util.DebugLogManager.log("[ONION_FALLBACK] tabId=$tabId url=$targetUrl -> $fallbackHttpUrl reason=$fallbackReason")
+              mainHandler.post {
+                loadUrl(tabId, fallbackHttpUrl, forceReload = true)
+              }
+              return null
             }
-            return null
           }
         }
 
