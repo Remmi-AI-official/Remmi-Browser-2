@@ -84,12 +84,18 @@ object NetworkHardening {
       "security.OCSP.enabled" to 0,
       "security.ssl.enable_ocsp_stapling" to false, // Disable OCSP stapling over Tor
       "network.stricttransportsecurity.preloadlist" to false,
+      "privacy.strict_transport_security.enable" to false, // Disable HSTS enforcement for .onion
+      "security.data_uri.block_toplevel_data_uri_navigations" to false, // Allow navigation from error and internal data URIs
       "network.http.rcwn.enabled" to false, // CRITICAL: disable race cache with network for Tor SOCKS proxy
-      "security.tls.version.min" to 3, // TLS 1.2 minimum
+      "security.tls.version.min" to 1, // TLS 1.0 minimum for broad .onion hidden service compatibility
       "security.tls.version.max" to 4, // TLS 1.3 maximum
+      "security.tls.version.fallback-limit" to 1,
+      "security.tls.version.enable-deprecated" to true,
+      "security.ssl.treat_unsafe_negotiation_as_broken" to false,
+      "security.pki.sha1_enforcement_level" to 0,
       "network.websocket.allowInsecureFromHTTPS" to false, // Block insecure WebSocket on HTTPS
-      "security.mixed_content.block_active_content" to true,
-      "security.mixed_content.upgrade_display_content" to true,
+      "security.mixed_content.block_active_content" to false, // Allow mixed content on .onion (hidden services are end-to-end encrypted)
+      "security.mixed_content.upgrade_display_content" to false, // Never auto-upgrade onion subresources to https
       "network.dns.echconfig.enabled" to false, // Disabled for Tor remote DNS compatibility
       "network.dns.use_https_rr_as_alpn" to false, // Disabled for Tor remote DNS compatibility
       "privacy.resistFingerprinting" to true,
