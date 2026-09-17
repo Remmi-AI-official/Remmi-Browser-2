@@ -135,7 +135,7 @@ dependencies {
   // implementation(libs.accompanist.permissions)
   // GeckoView & Tor dependencies (Pinned deterministic versions)
   implementation("org.mozilla.geckoview:geckoview:154.0.20260824154132")
-  implementation("info.guardianproject:tor-android:0.4.9.11")
+  implementation("info.guardianproject:tor-android:0.4.9.12")
   implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
   implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 

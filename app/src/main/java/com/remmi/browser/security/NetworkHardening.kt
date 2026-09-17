@@ -54,6 +54,7 @@ object NetworkHardening {
   }
 
   fun getHardenedPrivacyPreferences(settings: com.remmi.browser.storage.BrowserSettings? = null): Map<String, Any> {
+    val rfpEnabled = settings?.antiFingerprintingRFP ?: true
     return mapOf(
       "network.trr.mode" to 0, // Completely disable DoH in Tor Mode
       "network.dns.echconfig.enabled" to false, // Let Tor handle exit node encryption
@@ -105,9 +106,9 @@ object NetworkHardening {
       "security.mixed_content.upgrade_display_content" to false, // Never auto-upgrade onion subresources to https
       "network.dns.echconfig.enabled" to false, // Disabled for Tor remote DNS compatibility
       "network.dns.use_https_rr_as_alpn" to false, // Disabled for Tor remote DNS compatibility
-      "privacy.resistFingerprinting" to true,
+      "privacy.resistFingerprinting" to rfpEnabled,
       "privacy.firstparty.isolate" to (settings?.cookieIsolation ?: true),
-      "privacy.resistFingerprinting.letterboxing" to true,
+      "privacy.resistFingerprinting.letterboxing" to rfpEnabled,
       "privacy.resistFingerprinting.letterboxing.dimensions" to "360x640, 400x700, 480x800, 800x600",
       "privacy.resistFingerprinting.randomDataOnCanvasExtract" to false,
       "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts" to true,

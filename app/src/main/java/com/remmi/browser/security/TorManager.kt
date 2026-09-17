@@ -363,8 +363,9 @@ class TorManager(private val context: Context) {
         ClientUseIPv6 0
         ClientPreferIPv6ORPort 0
         ConnectionPadding 0
-        CircuitBuildTimeout 15
+        CircuitBuildTimeout 60
         LearnCircuitBuildTimeout 1
+        SocksTimeout 120
         NumEntryGuards 3
         DirCache 0
       """.trimIndent()

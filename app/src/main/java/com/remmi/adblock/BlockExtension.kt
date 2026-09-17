@@ -479,7 +479,17 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
         val bypass = sourceHost != null && siteSecurityProvider?.invoke(sourceHost) == true
 
         val decision = if (bypass) {
-          BlockDecision(blocked = false, ruleId = "bypass", ruleSource = "SiteSecurityProvider")
+          BlockDecision(
+            blocked = false,
+            ruleId = "bypass",
+            ruleSource = "SiteSecurityProvider"
+          )
+        } else if (resourceType == "main_frame") {
+          BlockDecision(
+            blocked = false,
+            ruleId = "top_level_document_exempt",
+            ruleSource = "TopLevelDocumentPolicy"
+          )
         } else {
           adblockBridge.evaluateDecision(
             url = url,
@@ -659,7 +669,17 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                   val bypass = sourceHost != null && siteSecurityProvider?.invoke(sourceHost) == true
 
                   val decision = if (bypass) {
-                    BlockDecision(blocked = false, ruleId = "bypass", ruleSource = "SiteSecurityProvider")
+                    BlockDecision(
+                      blocked = false,
+                      ruleId = "bypass",
+                      ruleSource = "SiteSecurityProvider"
+                    )
+                  } else if (resourceType == "main_frame") {
+                    BlockDecision(
+                      blocked = false,
+                      ruleId = "top_level_document_exempt",
+                      ruleSource = "TopLevelDocumentPolicy"
+                    )
                   } else {
                     var dec = adblockBridge.evaluateDecision(
                       url = url,
@@ -671,7 +691,7 @@ class BlockExtension private constructor(private val adblockBridge: AdblockBridg
                       thirdParty = thirdParty,
                       requestId = requestId
                     )
-                    if (!dec.blocked && (resourceType == "main_frame" || resourceType == "other")) {
+                    if (!dec.blocked && resourceType == "other") {
                       val popupDec = adblockBridge.evaluateDecision(
                         url = url,
                         sourceUrl = sourceUrl,

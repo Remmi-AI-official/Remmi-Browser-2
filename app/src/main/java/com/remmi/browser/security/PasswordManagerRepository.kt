@@ -136,53 +136,24 @@ class PasswordManagerRepository private constructor(
           try {
             val metadata = dbState.database.masterKeyMetadataDao().getMetadata()
             if (metadata == null) {
-              // Auto-initialize device keystore vault so passwords can be saved and autofilled seamlessly
-              try {
-                val dek = PasswordCryptoEngine.generateSecureRandomBytes(PasswordCryptoEngine.KEY_LENGTH_BYTES)
-                val wrapped = PasswordCryptoEngine.wrapDekWithDeviceKey(dek)
-                val newMeta = MasterKeyMetadataEntity(
-                  id = 1,
-                  encryptedDek = wrapped.ciphertext,
-                  dekIv = wrapped.iv,
-                  dekAuthTag = wrapped.authTag,
-                  kdfSalt = ByteArray(0),
-                  kdfParams = "DEVICE_KEYSTORE",
-                  verifier = ByteArray(0),
-                  verifierSalt = ByteArray(0),
-                )
-                dbState.database.masterKeyMetadataDao().saveMetadata(newMeta)
-                _lockState.value = VaultLockState.Unlocked(dek)
-                Log.i(TAG, "Device Keystore vault automatically initialized and unlocked.")
-              } catch (e: Exception) {
-                Log.w(TAG, "Failed auto-initializing device keystore vault: ${e.message}")
+              if (_lockState.value !is VaultLockState.TemporarilyLocked) {
                 _lockState.value = VaultLockState.Uninitialized
               }
             } else if (metadata.kdfParams == "DEVICE_KEYSTORE") {
-              try {
-                val dek = PasswordCryptoEngine.unwrapDekWithDeviceKey(metadata.encryptedDek, metadata.dekIv, metadata.dekAuthTag)
-                _lockState.value = VaultLockState.Unlocked(dek)
-                Log.i(TAG, "Device Keystore vault unlocked successfully.")
-              } catch (e: Exception) {
-                Log.w(TAG, "Failed unwrapping device DEK: ${e.message}, regenerating fresh device DEK...")
-                try {
-                  val dek = PasswordCryptoEngine.generateSecureRandomBytes(PasswordCryptoEngine.KEY_LENGTH_BYTES)
-                  val wrapped = PasswordCryptoEngine.wrapDekWithDeviceKey(dek)
-                  val newMeta = metadata.copy(
-                    encryptedDek = wrapped.ciphertext,
-                    dekIv = wrapped.iv,
-                    dekAuthTag = wrapped.authTag
-                  )
-                  dbState.database.masterKeyMetadataDao().saveMetadata(newMeta)
-                  _lockState.value = VaultLockState.Unlocked(dek)
-                } catch (_: Exception) {
-                  _lockState.value = VaultLockState.Uninitialized
-                }
+              if (_lockState.value !is VaultLockState.TemporarilyLocked) {
+                _lockState.value = VaultLockState.Locked
               }
             } else {
               // User has configured a custom Master Password / PIN
-              _lockState.value = VaultLockState.Locked
+              if (_lockState.value !is VaultLockState.TemporarilyLocked) {
+                _lockState.value = VaultLockState.Locked
+              }
             }
-          } catch (_: Throwable) {}
+          } catch (_: Throwable) {
+            if (_lockState.value !is VaultLockState.TemporarilyLocked) {
+              _lockState.value = VaultLockState.Uninitialized
+            }
+          }
         }
       }
     }

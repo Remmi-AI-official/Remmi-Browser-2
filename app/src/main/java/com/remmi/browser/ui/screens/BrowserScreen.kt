@@ -322,6 +322,14 @@ fun BrowserScreen(
 
   var showUrlSecuritySheet by remember { mutableStateOf(false) }
   var showRedirectChainSheet by remember { mutableStateOf(false) }
+  var redirectChainTabId by remember { mutableStateOf<String?>(null) }
+  
+  LaunchedEffect(settings.showRedirectChain) {
+    if (!settings.showRedirectChain) {
+      showRedirectChainSheet = false
+      redirectChainTabId = null
+    }
+  }
   var inspectingLinkData by remember { mutableStateOf<WebContextMenuData?>(null) }
   val activeChain by com.remmi.browser.engine.chain.NavigationChainTracker.activeChainFlow.collectAsState()
   var inspectingRedirectUrl by remember { mutableStateOf<String?>(null) }
@@ -2742,10 +2750,13 @@ fun BrowserScreen(
         showUrlSecuritySheet = false
         inspectingRedirectUrl = redirectUrl
       },
-      onViewRedirectChain = {
-        showUrlSecuritySheet = false
-        showRedirectChainSheet = true
-      }
+      onViewRedirectChain = if (settings.showRedirectChain) {
+        {
+          showUrlSecuritySheet = false
+          redirectChainTabId = activeTab.id
+          showRedirectChainSheet = true
+        }
+      } else null
     )
   }
 
@@ -2780,7 +2791,10 @@ fun BrowserScreen(
           parentTabId = activeTab.id,
           openedFromLink = true
         )
-        showRedirectChainSheet = true
+        if (settings.showRedirectChain) {
+          redirectChainTabId = activeTab.id
+          showRedirectChainSheet = true
+        }
       },
       onDeepAnalyze = { url ->
         inspectingLinkData = null
@@ -2790,10 +2804,13 @@ fun BrowserScreen(
   }
 
   // 6.8. Navigation Redirect Chain Sheet
-  if (showRedirectChainSheet) {
+  if (showRedirectChainSheet && settings.showRedirectChain) {
     RedirectChainSheet(
       chain = activeChain,
-      onDismiss = { showRedirectChainSheet = false },
+      onDismiss = {
+        showRedirectChainSheet = false
+        redirectChainTabId = null
+      },
       onOpenUrl = { url ->
         tabManager.updateTab(activeTab.id) { it.copy(url = url, isReaderMode = false, readerArticle = null) }
         geckoEngine.loadUrl(activeTab.id, url)

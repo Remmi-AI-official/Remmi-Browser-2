@@ -144,11 +144,22 @@ object NavigationSecurityAuthority {
     if (lower.contains("popads.net") || lower.contains("doubleclick.net") || lower.contains("propellerads.com") || lower.contains("exoclick.com")) {
       return true
     }
-    val hasSpamTld = lower.contains(".cfd/") || lower.contains(".shop/") || lower.contains(".buzz/") ||
-        lower.contains(".top/") || lower.contains(".xyz/") || lower.contains(".tk/") || lower.contains(".click/")
-    val hasTrackingQuery = lower.contains("cuid=") || lower.contains("cuid/") || lower.contains("/gd/") ||
-        lower.contains("token=") || lower.contains("subid=") || lower.contains("zone=") || lower.contains("clickid=")
-    if (hasSpamTld && hasTrackingQuery) {
+    val hasCheapTld =
+      lower.contains(".cfd/") ||
+      lower.contains(".buzz/") ||
+      lower.contains(".tk/")
+
+    val trackingParamCount = listOf(
+      "cuid=",
+      "cuid/",
+      "/gd/",
+      "token=",
+      "subid=",
+      "zone=",
+      "clickid="
+    ).count { lower.contains(it) }
+
+    if (hasCheapTld && trackingParamCount >= 2) {
       return true
     }
     return false

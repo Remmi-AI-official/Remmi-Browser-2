@@ -38,6 +38,7 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.AllowOrDeny
+import com.remmi.browser.storage.SettingsRepository
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoView
@@ -1645,24 +1646,37 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
         if (request.isRedirect && url.isNotBlank()) {
           lastRedirectUrls[tabId] = url
-          NavigationChainTracker.recordHop(
-            tabId = tabId,
-            uri = url,
-            hopType = HopType.HTTP_REDIRECT,
-            isRedirect = true,
-            hasUserGesture = request.hasUserGesture,
-            isDirectNavigation = request.isDirectNavigation,
-            triggerUri = request.triggerUri,
-            target = request.target
-          )
+          val preserveIntermediate = try {
+            SettingsRepository.getInstance(context).settings.value.preserveIntermediateUrls
+          } catch (_: Throwable) {
+            true
+          }
+          if (preserveIntermediate) {
+            NavigationChainTracker.recordHop(
+              tabId = tabId,
+              uri = url,
+              hopType = HopType.HTTP_REDIRECT,
+              isRedirect = true,
+              hasUserGesture = request.hasUserGesture,
+              isDirectNavigation = request.isDirectNavigation,
+              triggerUri = request.triggerUri,
+              target = request.target
+            )
+          }
         }
 
         val tab = TabManager.getInstance().getTab(tabId)
         val isOnionDestination = url.contains(".onion", ignoreCase = true) || com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(url)
         var isGhost = (tab?.profile == PrivacyProfile.GHOST) || (currentProfile == PrivacyProfile.GHOST)
         
+        val autoRouteOnion = try {
+          SettingsRepository.getInstance(context).settings.value.autoRouteOnionTabs
+        } catch (_: Throwable) {
+          true
+        }
+
         // Auto-upgrade clearnet tab to Ghost mode when clicking on a .onion link
-        if (isOnionDestination && !isGhost) {
+        if (isOnionDestination && !isGhost && autoRouteOnion) {
           Log.i(TAG, "[ONION_CLICK] .onion link clicked in Clearnet tab; transitioning to Ghost profile and loading via Tor")
           mainHandler.post {
             TabManager.getInstance().updateTab(tabId) { it.copy(profile = PrivacyProfile.GHOST) }
@@ -1690,6 +1704,20 @@ class GeckoEngineManager private constructor(private val context: Context) {
             com.remmi.browser.security.NavigationDecision.ALLOW -> {
                 // proceed
             }
+        }
+
+        val isUserTopLevelNav =
+          request.target == GeckoSession.NavigationDelegate.TARGET_WINDOW_CURRENT &&
+          (request.hasUserGesture || request.isDirectNavigation) &&
+          !request.isRedirect
+
+        if (isUserTopLevelNav) {
+          val result = GeckoResult<AllowOrDeny>()
+          engineScope.launch(Dispatchers.Main) {
+            processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
+            result.complete(AllowOrDeny.ALLOW)
+          }
+          return result
         }
 
         // Intercept all navigations through Adblock (User gesture, redirects, popups)
@@ -1982,13 +2010,20 @@ class GeckoEngineManager private constructor(private val context: Context) {
             val (newNavId, newGen) = allocateNavigationGeneration(newTab.id, "NEW_SESSION", uri)
             lastDispatchedUrls[newTab.id] = uri
 
-            NavigationChainTracker.recordHop(
-              tabId = tabId,
-              uri = uri,
-              hopType = HopType.NEW_WINDOW_BLANK,
-              triggerUri = sourceTab?.url,
-              target = 2
-            )
+            val logPopups = try {
+              SettingsRepository.getInstance(context).settings.value.logPopupEvents
+            } catch (_: Throwable) {
+              true
+            }
+            if (logPopups) {
+              NavigationChainTracker.recordHop(
+                tabId = tabId,
+                uri = uri,
+                hopType = HopType.NEW_WINDOW_BLANK,
+                triggerUri = sourceTab?.url,
+                target = 2
+              )
+            }
             NavigationChainTracker.linkParentChain(
               childTabId = newTab.id,
               parentTabId = tabId,

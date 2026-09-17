@@ -599,7 +599,10 @@ private fun LockedVaultScreen(
 
   LaunchedEffect(Unit) {
     if (repo.isBiometricAvailable()) {
-      triggerBiometrics()
+      val meta = repo.getMasterKeyMetadata()
+      if (meta?.kdfParams == "DEVICE_KEYSTORE" || meta?.biometricEnabled == true) {
+        triggerBiometrics()
+      }
     }
   }
 
@@ -1833,6 +1836,16 @@ private fun VaultSettingsSheet(
 
   var isBiometricAvailable by remember { mutableStateOf(repo.isBiometricAvailable()) }
   var isAutoWipeEnabled by remember { mutableStateOf(false) }
+
+  LaunchedEffect(Unit) {
+    val meta = repo.getMasterKeyMetadata()
+    if (meta != null) {
+      isAutoWipeEnabled = meta.autoWipeEnabled
+      if (meta.kdfParams != "DEVICE_KEYSTORE") {
+        isBiometricAvailable = repo.isBiometricAvailable() && meta.biometricEnabled
+      }
+    }
+  }
 
   Dialog(onDismissRequest = onDismiss) {
     Card(
