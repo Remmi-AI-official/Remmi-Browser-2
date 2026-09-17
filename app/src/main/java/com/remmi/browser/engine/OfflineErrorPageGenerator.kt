@@ -36,16 +36,23 @@ object OfflineErrorPageGenerator {
     val buttonBg = if (isOnion) "#9333ea" else "#2563eb"
     val buttonText = "#ffffff"
 
+    val isCertError = errorCode.contains("CERT", ignoreCase = true) || errorCode.contains("SECURITY", ignoreCase = true)
     val isV2Onion = isOnion && (host.endsWith(".onion", ignoreCase = true) && host.substringBefore(".onion").length == 16)
     val title = if (isV2Onion) {
       "V2 Onion Deprecated"
+    } else if (isOnion && isCertError) {
+      "SSL Certificate Warning (.onion)"
     } else if (isOnion) {
       "Onion Site Unreachable"
+    } else if (isCertError) {
+      "Security Certificate Warning"
     } else {
       "You're not connected"
     }
     val subtitle = if (isV2Onion) {
       "<strong>$escapedHost</strong> is an obsolete 16-character v2 Onion service. The Tor network permanently retired v2 services in 2021. Please use the modern 56-character v3 .onion address."
+    } else if (isOnion && isCertError) {
+      "<strong>$escapedHost</strong> has an unverified or self-signed SSL certificate. Because this is a .onion hidden service, your connection is already end-to-end encrypted by Tor."
     } else if (isOnion) {
       "Could not establish a secure circuit to <strong>$escapedHost</strong> over the Tor network."
     } else {

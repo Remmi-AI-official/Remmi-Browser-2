@@ -2285,11 +2285,20 @@ class GeckoEngineManager private constructor(private val context: Context) {
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
         val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
 
-        // 1. Onion HTTPS fallback: if connection failed on HTTPS (security/cert error, refused, timed out, reset, or interrupt)
-        // attempt single fallback to HTTP to avoid redirect loops, since hidden services are natively encrypted by Tor.
+        // 1. Certificate / Security Error:
+        // Return null so GeckoView displays its native about:certerror page.
+        // This is critical because only the native about:certerror chrome page has privileged
+        // access to add certificate exceptions ("Advanced -> Accept the Risk and Continue") into NSS.
+        // A custom data: URI cannot override certificate security.
+        if (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY) {
+          Log.i(TAG, "Security/certificate error for $targetUrl (code=${error.code}); delegating to native GeckoView about:certerror")
+          return null
+        }
+
+        // 2. Onion HTTPS unreachable fallback: if connection failed on HTTPS because port 443 is unreachable
+        // (connection refused, timed out, reset, or interrupted), attempt single fallback to HTTP port 80.
         if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion &&
-            (error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY ||
-             error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
+            (error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
              error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
              error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
              error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT)
@@ -2297,10 +2306,11 @@ class GeckoEngineManager private constructor(private val context: Context) {
           if (!onionFallbackAttempts.contains(targetUrl)) {
             onionFallbackAttempts.add(targetUrl)
             val fallbackHttpUrl = "http://" + targetUrl.substring(8)
-            Log.i(TAG, "Onion HTTPS port connection failed (code=${error.code}, category=${error.category}); single fallback to HTTP: $fallbackHttpUrl")
+            Log.i(TAG, "Onion HTTPS port unreachable (code=${error.code}); falling back to HTTP: $fallbackHttpUrl")
             CoroutineScope(Dispatchers.Main.immediate).launch {
               loadUrl(tabId, fallbackHttpUrl, forceReload = true)
             }
+            return null
           }
         }
 

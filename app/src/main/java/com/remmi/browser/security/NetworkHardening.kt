@@ -96,6 +96,10 @@ object NetworkHardening {
       "security.tls.version.enable-deprecated" to true,
       "security.ssl.treat_unsafe_negotiation_as_broken" to false,
       "security.pki.sha1_enforcement_level" to 0,
+      "security.pki.name_matching_mode" to 3,
+      "security.pki.crlite_mode" to 0,
+      "security.pki.distrust_ca_policy" to 0,
+      "security.ssl.errorReporting.automatic" to false,
       "network.websocket.allowInsecureFromHTTPS" to false, // Block insecure WebSocket on HTTPS
       "security.mixed_content.block_active_content" to false, // Allow mixed content on .onion (hidden services are end-to-end encrypted)
       "security.mixed_content.upgrade_display_content" to false, // Never auto-upgrade onion subresources to https
