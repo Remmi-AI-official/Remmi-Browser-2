@@ -2299,9 +2299,8 @@ class GeckoEngineManager private constructor(private val context: Context) {
             val fallbackHttpUrl = "http://" + targetUrl.substring(8)
             Log.i(TAG, "Onion HTTPS port connection failed (code=${error.code}, category=${error.category}); single fallback to HTTP: $fallbackHttpUrl")
             CoroutineScope(Dispatchers.Main.immediate).launch {
-              loadUrl(tabId, fallbackHttpUrl)
+              loadUrl(tabId, fallbackHttpUrl, forceReload = true)
             }
-            return null
           }
         }
 

@@ -85,6 +85,9 @@ object NetworkHardening {
       "security.ssl.enable_ocsp_stapling" to false, // Disable OCSP stapling over Tor
       "network.stricttransportsecurity.preloadlist" to false,
       "privacy.strict_transport_security.enable" to false, // Disable HSTS enforcement for .onion
+      "network.http.upgrade-insecure-requests.enabled" to false, // Do not send Upgrade-Insecure-Requests on .onion
+      "security.insecure_connection_icon.enabled" to false,
+      "security.insecure_field_warning.contextual.enabled" to false,
       "security.data_uri.block_toplevel_data_uri_navigations" to false, // Allow navigation from error and internal data URIs
       "network.http.rcwn.enabled" to false, // CRITICAL: disable race cache with network for Tor SOCKS proxy
       "security.tls.version.min" to 1, // TLS 1.0 minimum for broad .onion hidden service compatibility
