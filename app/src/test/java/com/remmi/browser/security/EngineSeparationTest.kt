@@ -18,8 +18,8 @@ class EngineSeparationTest {
     @Before
     fun setUp() {
         val bridge = AdblockBridge.getInstance()
-        while (!bridge.isInitialized()) {
-            Thread.sleep(10)
+        if (!bridge.isInitialized()) {
+            bridge.initEngine()
         }
         ReflectionHelpers.setField(bridge, "isNativeLoaded", false)
     }
