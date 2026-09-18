@@ -10,6 +10,7 @@ import org.mozilla.geckoview.GeckoPreferenceController.SetGeckoPreference
 import org.mozilla.geckoview.GeckoPreferenceController.GeckoPreference
 import kotlin.coroutines.resume
 
+@OptIn(org.mozilla.geckoview.ExperimentalGeckoViewApi::class)
 class GeckoPreferenceController(private val runtime: GeckoRuntime?) {
   companion object {
     const val PREF_BRANCH_USER: Int = NativePrefCtrl.PREF_BRANCH_USER

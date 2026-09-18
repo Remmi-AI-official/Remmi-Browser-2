@@ -665,7 +665,13 @@ object RedirectInspector {
       val ipLiteral = host.removePrefix("[").removeSuffix("]")
       val isNumeric = ipLiteral.matches(Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$""")) ||
         ipLiteral.contains(":") ||
-        (try { android.net.InetAddresses.isNumericAddress(ipLiteral) } catch (_: Throwable) { false })
+        (try {
+          if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            android.net.InetAddresses.isNumericAddress(ipLiteral)
+          } else {
+            android.util.Patterns.IP_ADDRESS.matcher(ipLiteral).matches()
+          }
+        } catch (_: Throwable) { false })
       if (isNumeric) {
         val parsedAddr = InetAddress.getByName(ipLiteral)
         val (safe, reason) = isInetAddressSafe(parsedAddr)

@@ -43,7 +43,11 @@ class ClipboardManager(private val context: Context) {
     Handler(Looper.getMainLooper()).postDelayed({
       try {
         if (clipboard.primaryClip?.getItemAt(0)?.text?.toString() == text) {
-          clipboard.clearPrimaryClip()
+          if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            clipboard.clearPrimaryClip()
+          } else {
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+          }
         }
       } catch (e: Exception) {
         // Ignored

@@ -131,8 +131,14 @@ object NavigationSecurityAuthority {
 
     // Check IP literal directly
     try {
-      if (android.net.InetAddresses.isNumericAddress(clean.removePrefix("[").removeSuffix("]"))) {
-        val addr = InetAddress.getByName(clean.removePrefix("[").removeSuffix("]"))
+      val rawIp = clean.removePrefix("[").removeSuffix("]")
+      val isNumeric = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        android.net.InetAddresses.isNumericAddress(rawIp)
+      } else {
+        android.util.Patterns.IP_ADDRESS.matcher(rawIp).matches() || rawIp.contains(":")
+      }
+      if (isNumeric) {
+        val addr = InetAddress.getByName(rawIp)
         val (isSafe, _) = RedirectInspector.isInetAddressSafe(addr)
         if (!isSafe) return true
       }

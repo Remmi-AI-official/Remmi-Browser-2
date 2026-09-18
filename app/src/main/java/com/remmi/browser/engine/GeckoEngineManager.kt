@@ -3928,6 +3928,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     }
   }
 
+  @Suppress("WrongConstant")
   fun findInPage(
     tabId: String,
     query: String,

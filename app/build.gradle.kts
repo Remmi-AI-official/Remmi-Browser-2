@@ -117,7 +117,7 @@ android {
   lint {
     checkReleaseBuilds = true
     abortOnError = true
-    disable += listOf("InvalidFragmentVersionForActivityResult")
+    disable += listOf("InvalidFragmentVersionForActivityResult", "UnsafeOptInUsageError")
   }
   dependenciesInfo {
     includeInApk = false

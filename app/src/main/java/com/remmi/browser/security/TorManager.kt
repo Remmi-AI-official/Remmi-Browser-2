@@ -210,11 +210,12 @@ class TorManager(private val context: Context) {
         addAction(TorService.ACTION_STATUS)
         addAction(TorService.ACTION_ERROR)
       }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        context.registerReceiver(torStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-      } else {
-        context.registerReceiver(torStatusReceiver, filter)
-      }
+      androidx.core.content.ContextCompat.registerReceiver(
+        context,
+        torStatusReceiver,
+        filter,
+        androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Failed to register Tor status receiver", e)
     }
