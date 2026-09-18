@@ -2,16 +2,33 @@ package com.remmi.browser.security
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.remmi.adblock.AdblockBridge
+import org.junit.After
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class EngineSeparationTest {
+
+    @Before
+    fun setUp() {
+        val bridge = AdblockBridge.getInstance()
+        while (!bridge.isInitialized()) {
+            Thread.sleep(10)
+        }
+        ReflectionHelpers.setField(bridge, "isNativeLoaded", false)
+    }
+
+    @After
+    fun tearDown() {
+        val bridge = AdblockBridge.getInstance()
+        ReflectionHelpers.setField(bridge, "isNativeLoaded", false)
+    }
 
     @Test
     fun test1_defaultEngineNetworkBlock() {

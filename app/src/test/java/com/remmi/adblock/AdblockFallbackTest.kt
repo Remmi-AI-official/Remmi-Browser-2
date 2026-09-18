@@ -1,5 +1,7 @@
 package com.remmi.adblock
 
+import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -12,6 +14,20 @@ import org.robolectric.util.ReflectionHelpers
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class AdblockFallbackTest {
+
+  @Before
+  fun setUp() {
+    val bridge = AdblockBridge.getInstance()
+    while (!bridge.isInitialized()) {
+      Thread.sleep(10)
+    }
+  }
+
+  @After
+  fun tearDown() {
+    val bridge = AdblockBridge.getInstance()
+    ReflectionHelpers.setField(bridge, "isNativeLoaded", false)
+  }
 
   @Test
   fun testHealthyNativeSkipsFallback() {
@@ -29,7 +45,6 @@ class AdblockFallbackTest {
     
     // Default patterns + domains are always added, but the specific 'rules' string is skipped
     // because parseToFallback should return early when isNativeLoaded = true.
-    // Wait, our implementation of skipping just avoids calling `parseToFallback` altogether.
     var foundTestDomain = false
     for (netRule in fallbackEngine.fallbackNetworkRules) {
       if (netRule.raw == "||test-healthy-skip.com^") {

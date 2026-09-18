@@ -1315,7 +1315,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
   }
 
   private fun assertMainThread(operation: String) {
-    val isMain = Looper.myLooper() == Looper.getMainLooper()
+    val isMain = Looper.getMainLooper().thread == Thread.currentThread() || Looper.myLooper() == Looper.getMainLooper()
     Log.d(TAG, "[GECKO] operation=$operation thread=${if (isMain) "main" else "ILLEGAL_${Thread.currentThread().name}"}")
     check(isMain) { "Gecko operation $operation MUST be called on the Main thread! (Current: ${Thread.currentThread().name})" }
   }
@@ -1770,75 +1770,53 @@ class GeckoEngineManager private constructor(private val context: Context) {
             }
         }
 
-        val isUserTopLevelNav =
-          request.target == GeckoSession.NavigationDelegate.TARGET_WINDOW_CURRENT &&
-          (request.hasUserGesture || request.isDirectNavigation) &&
-          !request.isRedirect
-
-        if (isUserTopLevelNav) {
-          val result = GeckoResult<AllowOrDeny>()
-          engineScope.launch(Dispatchers.Main) {
-            processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
-            result.complete(AllowOrDeny.ALLOW)
-          }
-          return result
-        }
-
         // Intercept all navigations through Adblock (User gesture, redirects, popups)
         val sourceUrl = lastObservedUrls[tabId] ?: lastDispatchedUrls[tabId] ?: tab?.url ?: ""
         val sourceHost = try { if (sourceUrl.isNotBlank()) java.net.URI(sourceUrl).host?.lowercase() else null } catch (_: Exception) { null }
         val targetHost = try { if (url.isNotBlank()) java.net.URI(url).host?.lowercase() else null } catch (_: Exception) { null }
         val isCrossHost = sourceHost != null && targetHost != null && sourceHost != targetHost
 
-        val result = GeckoResult<AllowOrDeny>()
         val triggerUri = request.triggerUri ?: sourceUrl
         val isRedirect = request.isRedirect
         val hasUserGesture = request.hasUserGesture
 
-        engineScope.launch(Dispatchers.Default) {
-          val bridge = AdblockBridge.getInstance()
-          val popupDec = bridge.evaluateDecision(
+        val bridge = AdblockBridge.getInstance()
+        val popupDec = bridge.evaluateDecision(
+          url = url,
+          sourceUrl = sourceUrl,
+          initiator = triggerUri,
+          method = "GET",
+          resourceType = "popup",
+          aggressive = isGhost,
+          thirdParty = isCrossHost
+        )
+        val docDec = if (!popupDec.blocked) {
+          bridge.evaluateDecision(
             url = url,
             sourceUrl = sourceUrl,
             initiator = triggerUri,
             method = "GET",
-            resourceType = "popup",
+            resourceType = "main_frame",
             aggressive = isGhost,
             thirdParty = isCrossHost
           )
-          val docDec = if (!popupDec.blocked) {
-            bridge.evaluateDecision(
-              url = url,
-              sourceUrl = sourceUrl,
-              initiator = triggerUri,
-              method = "GET",
-              resourceType = "main_frame",
-              aggressive = isGhost,
-              thirdParty = isCrossHost
-            )
-          } else popupDec
+        } else popupDec
 
-          val isAdRedirect = com.remmi.browser.security.NavigationSecurityAuthority.isAdOrSpamDestination(url)
+        val isAdRedirect = com.remmi.browser.security.NavigationSecurityAuthority.isAdOrSpamDestination(url)
 
-          if (popupDec.blocked || docDec.blocked || isAdRedirect) {
-            val blockedRuleId = popupDec.ruleId ?: docDec.ruleId ?: "spam_redirect"
-            val blockMsg = "[FORENSIC] [NAV_REDIRECT_BLOCKED] tabId=$tabId url=$url sourceUrl=$sourceUrl isRedirect=$isRedirect hasUserGesture=$hasUserGesture ruleId=$blockedRuleId"
-            Log.w(TAG, blockMsg)
-            com.remmi.browser.util.DebugLogManager.log(blockMsg)
-            Log.i(TAG, "[ADBLOCK_BLOCK] url=$url rule=$blockedRuleId")
-            Log.i(TAG, "[ADBLOCK_BLOCK]\n$url\nmatched_rule\n$blockedRuleId")
-            NavigationChainTracker.markSecurityBlocked(tabId, url, "adblock_redirect_denied")
-            withContext(Dispatchers.Main) {
-              result.complete(AllowOrDeny.DENY)
-            }
-          } else {
-            withContext(Dispatchers.Main) {
-              processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
-              result.complete(AllowOrDeny.ALLOW)
-            }
-          }
+        if (popupDec.blocked || docDec.blocked || isAdRedirect) {
+          val blockedRuleId = popupDec.ruleId ?: docDec.ruleId ?: "spam_redirect"
+          val blockMsg = "[FORENSIC] [NAV_REDIRECT_BLOCKED] tabId=$tabId url=$url sourceUrl=$sourceUrl isRedirect=$isRedirect hasUserGesture=$hasUserGesture ruleId=$blockedRuleId"
+          Log.w(TAG, blockMsg)
+          com.remmi.browser.util.DebugLogManager.log(blockMsg)
+          Log.i(TAG, "[ADBLOCK_BLOCK] url=$url rule=$blockedRuleId")
+          Log.i(TAG, "[ADBLOCK_BLOCK]\n$url\nmatched_rule\n$blockedRuleId")
+          NavigationChainTracker.markSecurityBlocked(tabId, url, "adblock_redirect_denied")
+          return GeckoResult.fromValue(AllowOrDeny.DENY)
+        } else {
+          processAllowedLoadRequest(tabId, session, navId, gen, url, sessId, viewId, request, now)
+          return GeckoResult.fromValue(AllowOrDeny.ALLOW)
         }
-        return result
       }
 
       private fun processAllowedLoadRequest(
@@ -1896,7 +1874,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
             lastDispatchedUrls[tabId] = url
             presentationTargetUrls[tabId] = url
             logNavCorrelation(tabId, navId, gen, url, "onLoadRequest", "redirect")
-          } else if (isSameTarget || (isInFlight && (isSameUrl || isEquivalentToDispatched || isBackOrForward || isRecentlyDispatched))) {
+          } else if (isSameTarget || (isInFlight && (isSameUrl || isEquivalentToDispatched || isBackOrForward))) {
             // Belongs to the existing in-flight app navigation intent (e.g. loadUrl, reload, back, forward)
             // One real user navigation = one logical navigation generation = one navId = one actual load dispatch
             val corrMsg = "[FORENSIC][NAV_CORRELATE_EXISTING] tabId=$tabId navId=$navId gen=$gen url=$url reason=inflight_target"
@@ -2979,7 +2957,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     operation: String,
     action: (GeckoSession) -> Unit,
   ) {
-    if (Looper.myLooper() != Looper.getMainLooper()) {
+    if (Looper.myLooper() != Looper.getMainLooper() && Looper.getMainLooper().thread != Thread.currentThread()) {
       mainHandler.post { onMainSession(tabId, operation, action) }
       return
     }
@@ -3072,7 +3050,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
     session: GeckoSession,
     terminationType: String // "CRASH" or "KILL"
   ) {
-    if (Looper.myLooper() != Looper.getMainLooper()) {
+    if (Looper.myLooper() != Looper.getMainLooper() && Looper.getMainLooper().thread != Thread.currentThread()) {
       mainHandler.post { handleContentProcessTermination(tabId, session, terminationType) }
       return
     }
@@ -3659,7 +3637,7 @@ class GeckoEngineManager private constructor(private val context: Context) {
       applySiteSecurityPolicy(tabId, host)
     }
     
-    if (Looper.myLooper() != Looper.getMainLooper()) {
+    if (Looper.myLooper() != Looper.getMainLooper() && Looper.getMainLooper().thread != Thread.currentThread()) {
       mainHandler.post { loadUrl(tabId, targetUrl, forceReload) }
       return
     }

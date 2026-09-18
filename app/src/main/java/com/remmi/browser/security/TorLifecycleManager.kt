@@ -61,6 +61,19 @@ class TorLifecycleManager private constructor(private val context: Context) {
 
   fun setTorReadyForTesting(ready: Boolean) {
     _isTorReady.value = ready
+    if (ready) {
+      val gen = CurrentTorRoute.markStartingGhost()
+      CurrentTorRoute.updateRoute(
+        socksPort = 9050,
+        isGhostActive = true,
+        isVerified = true,
+        exitIp = "127.0.0.1",
+        generation = gen
+      )
+      CurrentTorRoute.setPhase(GhostRoutePhase.READY, gen)
+    } else {
+      CurrentTorRoute.clearRoute()
+    }
   }
 
   private val _bootstrapProgress = MutableStateFlow(0)

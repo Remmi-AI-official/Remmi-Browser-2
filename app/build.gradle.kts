@@ -22,17 +22,15 @@ android {
     }
   }
 
-  val releaseTaskRequested = gradle.startParameter.taskNames.any {
-    it.contains("Release", ignoreCase = true)
+  val releaseTaskRequested = gradle.startParameter.taskNames.any { task ->
+    !task.startsWith("-") && (task.contains("assembleRelease", ignoreCase = true) ||
+     task.contains("bundleRelease", ignoreCase = true) ||
+     task.contains("packageRelease", ignoreCase = true) ||
+     task.contains("publishRelease", ignoreCase = true) ||
+     (task.endsWith("Release", ignoreCase = true) && !task.contains("lint", ignoreCase = true) && !task.contains("test", ignoreCase = true)))
   }
 
   signingConfigs {
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH")
       val storePassword = System.getenv("STORE_PASSWORD")
@@ -57,7 +55,6 @@ android {
 
   buildTypes {
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
     }
     release {
       isCrunchPngs = false

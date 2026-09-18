@@ -147,17 +147,8 @@ class FilterManager(
 
     val baseList = defaultList.map { sub ->
       val enabled = prefs?.getBoolean("filter_${sub.id}", sub.enabled) ?: sub.enabled
-      var count = prefs?.getInt("count_${sub.id}", sub.ruleCount) ?: sub.ruleCount
+      val count = prefs?.getInt("count_${sub.id}", sub.ruleCount) ?: sub.ruleCount
       val updated = prefs?.getLong("updated_${sub.id}", 0L) ?: 0L
-      if (count <= 0) {
-        count = when (sub.id) {
-          "easylist" -> 72000
-          "easyprivacy" -> 46000
-          "fanboy_annoyance" -> 64000
-          "brave_unbreak" -> 3500
-          else -> 0
-        }
-      }
       sub.copy(enabled = enabled, ruleCount = count, lastUpdated = updated)
     }
     return baseList + customList

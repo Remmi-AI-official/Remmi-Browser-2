@@ -686,13 +686,13 @@ class PasswordManagerRepository private constructor(
       val state = _lockState.value
       if (state !is VaultLockState.Unlocked) throw IllegalStateException("Vault is locked.")
 
-      val canonicalUrl = PasswordCryptoEngine.canonicalizeOrigin(url) ?: url.trim()
-      val siteHash = PasswordCryptoEngine.hashSiteUrl(canonicalUrl)
+      val canonicalOrigin = PasswordCryptoEngine.canonicalizeOrigin(url) ?: url.trim()
+      val siteHash = PasswordCryptoEngine.hashSiteUrl(url)
       val cleanUser = username.trim()
       val cleanPass = password.trim()
 
       // Debounce window (3000ms): if identical entry was recently saved, prevent duplicate entry
-      val saveKey = "$canonicalUrl|$cleanUser|$cleanPass"
+      val saveKey = "$url|$cleanUser|$cleanPass"
       val now = System.currentTimeMillis()
       val lastSaved = recentSaveTimes[saveKey]
       if (lastSaved != null && (now - lastSaved) < 3000L && existingId <= 0) {
@@ -703,7 +703,7 @@ class PasswordManagerRepository private constructor(
             val u = String(uBytes, StandardCharsets.UTF_8).trim()
             PasswordCryptoEngine.zeroize(uBytes)
             if (u.equals(cleanUser, ignoreCase = true)) {
-              Log.i(TAG, "Debounced duplicate save for $canonicalUrl ($cleanUser), returning existing ID ${cand.id}")
+              Log.i(TAG, "Debounced duplicate save for $url ($cleanUser), returning existing ID ${cand.id}")
               return@withLock cand.id
             }
           } catch (_: Exception) {}
@@ -727,7 +727,7 @@ class PasswordManagerRepository private constructor(
         }
       }
 
-      val urlEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, canonicalUrl.toByteArray(StandardCharsets.UTF_8))
+      val urlEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, url.trim().toByteArray(StandardCharsets.UTF_8))
       val userEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, cleanUser.toByteArray(StandardCharsets.UTF_8))
       val passEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, cleanPass.toByteArray(StandardCharsets.UTF_8))
       val notesEnc = PasswordCryptoEngine.encryptAesGcmPacked(state.dek, notes.toByteArray(StandardCharsets.UTF_8))
@@ -750,11 +750,11 @@ class PasswordManagerRepository private constructor(
 
       if (finalId > 0) {
         getDb().passwordEntryDao().update(entity)
-        Log.i(TAG, "Updated existing password entry ID $finalId for $canonicalUrl ($cleanUser)")
+        Log.i(TAG, "Updated existing password entry ID $finalId for $url ($cleanUser)")
         return@withLock finalId
       } else {
         val newId = getDb().passwordEntryDao().insert(entity)
-        Log.i(TAG, "Inserted new password entry ID $newId for $canonicalUrl ($cleanUser)")
+        Log.i(TAG, "Inserted new password entry ID $newId for $url ($cleanUser)")
         return@withLock newId
       }
     }
@@ -868,8 +868,7 @@ class PasswordManagerRepository private constructor(
         PasswordCryptoEngine.zeroize(entryUrlBytes)
 
         val entryOrigin = PasswordCryptoEngine.canonicalizeOrigin(entryUrl)
-        val entryHost = PasswordCryptoEngine.extractCanonicalHost(entryUrl)
-        if (entryOrigin == canonicalOrigin || (entryHost.isNotEmpty() && entryHost.equals(targetHost, ignoreCase = true))) {
+        if (entryOrigin == canonicalOrigin) {
           val userBytes = PasswordCryptoEngine.decryptAesGcmPacked(state.dek, candidate.usernameEncrypted, candidate.iv, candidate.authTag)
           val user = String(userBytes, StandardCharsets.UTF_8)
           PasswordCryptoEngine.zeroize(userBytes)

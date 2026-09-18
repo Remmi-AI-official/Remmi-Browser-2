@@ -96,6 +96,7 @@ class TabManager {
   }
 
   fun checkAndEmitTabStateRate(tabId: String? = null) {
+    if (!isAutoFlushEnabled) return
     val now = System.currentTimeMillis()
     val last = lastRateLogTimestamp.get()
     if (now - last >= 1000L && lastRateLogTimestamp.compareAndSet(last, now)) {

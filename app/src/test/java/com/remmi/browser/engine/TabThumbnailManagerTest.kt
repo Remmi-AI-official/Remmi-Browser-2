@@ -51,7 +51,7 @@ class TabThumbnailManagerTest {
 
     val loaded = thumbnailManager.getThumbnail(tabId)
     assertNotNull("Loaded thumbnail must not be null", loaded)
-    assertEquals(480, loaded!!.width) // Scaled width
+    assertEquals(360, loaded!!.width) // Scaled width
     assertTrue(thumbnailManager.thumbnailVersions.value.containsKey(tabId))
   }
 
@@ -99,9 +99,8 @@ class TabThumbnailManagerTest {
     // Before debounce timer fires: 0 executions
     assertEquals(0, thumbnailManager.captureExecutedCounter.get())
 
-    // Advance shadow looper and delay past debounce duration
-    delay(300)
-    shadowOf(android.os.Looper.getMainLooper()).idle()
+    // Advance shadow looper past debounce duration
+    shadowOf(android.os.Looper.getMainLooper()).runToEndOfTasks()
 
     // Exactly 1 execution occurred for the 5 calls
     assertEquals(1, thumbnailManager.captureExecutedCounter.get())

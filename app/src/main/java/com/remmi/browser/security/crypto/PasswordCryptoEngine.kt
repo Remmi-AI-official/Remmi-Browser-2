@@ -348,7 +348,7 @@ object PasswordCryptoEngine {
     } ?: return null
 
     val scheme = uri.scheme?.lowercase(java.util.Locale.US) ?: return null
-    if (scheme != "https" && scheme != "http") {
+    if (scheme != "https") {
       return null
     }
 

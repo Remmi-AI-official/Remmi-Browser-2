@@ -265,6 +265,8 @@ class AdblockBridge {
   private val initialized = AtomicBoolean(false)
   private val isInitializing = AtomicBoolean(false)
 
+  fun isInitialized(): Boolean = initialized.get()
+
   init {
     // Lightweight constructor: initialize in-memory fallback rules only
     loadDefaultTrackerRules(compileToNative = false)
@@ -910,8 +912,7 @@ class AdblockBridge {
           }
 
           fun parseToFallback(rules: String, isAdditional: Boolean) {
-            if (rules.isBlank()) return
-            if (isNativeLoaded) return
+            if (rules.isBlank() || isNativeLoaded) return
             rules.lines().forEach { line ->
               val trimmed = line.trim()
               if (trimmed.isNotEmpty() && !trimmed.startsWith("!")) {

@@ -85,12 +85,21 @@ object NavigationSecurityAuthority {
     }
 
     val isOnion = NetworkRouteAuthority.isOnionDestination(trimmed)
-    if (isOnion && !isGhost) {
-      Log.w(TAG, "Navigation BLOCKED: .onion requested but tab is in Clearnet mode (isGhost=false).")
-      return NavigationCheckResult(
-        NavigationDecision.BLOCK,
-        reason = ".onion hidden services require an active Tor (Ghost) tab session."
-      )
+    if (isOnion) {
+      if (!isGhost) {
+        Log.w(TAG, "Navigation BLOCKED: .onion requested but tab is in Clearnet mode (isGhost=false).")
+        return NavigationCheckResult(
+          NavigationDecision.BLOCK,
+          reason = ".onion hidden services require an active Tor (Ghost) tab session."
+        )
+      }
+      if (!CurrentTorRoute.isReady) {
+        Log.w(TAG, "Navigation BLOCKED: .onion requested but Tor route is not yet fully READY.")
+        return NavigationCheckResult(
+          NavigationDecision.BLOCK,
+          reason = ".onion hidden services require a fully verified Tor route in READY state."
+        )
+      }
     }
 
     // Sanitize and strictly enforce HTTPS upgrade (or keep HTTP for onion)
