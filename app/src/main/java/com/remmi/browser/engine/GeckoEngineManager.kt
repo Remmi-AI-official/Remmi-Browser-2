@@ -418,6 +418,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
     return currentScrollPositions[tabId] ?: 0
   }
   private val lastOriginalFailures = mutableMapOf<String, String>()
+  private val originalRequestedUrls = mutableMapOf<String, String>()
+  private val originalRequestedSchemes = mutableMapOf<String, String>()
+  private val onionHttpFallbackAttempts = mutableMapOf<String, Int>()
   private val sessionGenerations = mutableMapOf<String, Long>()
   private val viewGenerations = mutableMapOf<String, Long>()
   private val lastRedirectUrls = mutableMapOf<String, String>()
@@ -447,6 +450,10 @@ class GeckoEngineManager private constructor(private val context: Context) {
   var autofillCoordinatorProvider: (() -> com.remmi.browser.security.autofill.PasswordAutofillCoordinator?)? = null
 
   fun getRecoveryState(tabId: String): RecoveryState = recoveryStates[tabId] ?: RecoveryState.NONE
+
+  fun getOriginalRequestedUrl(tabId: String): String? = originalRequestedUrls[tabId]
+  fun getOriginalRequestedScheme(tabId: String): String? = originalRequestedSchemes[tabId]
+  fun getOnionHttpFallbackAttempts(tabId: String, host: String): Int = onionHttpFallbackAttempts["$tabId:$host"] ?: 0
 
   fun transitionRecoveryState(
     tabId: String,
@@ -657,6 +664,18 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
     val isRealWebUrl = url.isNotBlank() && !isInternalOrIgnoredUrl(url) && url != "about:blank" && url != "remmi://newtab" && url != "about:home"
     if (isRealWebUrl) {
+      if (trigger != "LOCATION_CHANGED" || !originalRequestedUrls.containsKey(tabId)) {
+        val parsedUri = parseUri(url)
+        val reqScheme = parsedUri?.scheme?.lowercase() ?: if (url.startsWith("http://", ignoreCase = true)) "http" else if (url.startsWith("https://", ignoreCase = true)) "https" else ""
+        originalRequestedUrls[tabId] = url
+        originalRequestedSchemes[tabId] = reqScheme
+        if (url.contains(".onion", ignoreCase = true)) {
+          val onionSchemeMsg = "[ONION_SCHEME] requested=$url effective=$url"
+          Log.i(TAG, onionSchemeMsg)
+          com.remmi.browser.util.DebugLogManager.log(onionSchemeMsg)
+        }
+      }
+
       updatePresentationState(tabId, PresentationState.REAL_NAVIGATION_IN_PROGRESS)
       presentationNavIds[tabId] = newNavId
       presentationGenerations[tabId] = newGen
@@ -901,6 +920,13 @@ class GeckoEngineManager private constructor(private val context: Context) {
         com.remmi.browser.util.DebugLogManager.log(failMsg)
         lastOriginalFailures[tabId] = failureType
       }
+      "CERTIFICATE_ERROR" -> {
+        val reason = "certificate_validation_failed"
+        val lifecycleMsg = "[FORENSIC][POST_NAV_LIFECYCLE] tabId=$tabId navId=$navId gen=$gen url=$curr event=CERTIFICATE_ERROR failure=$failureType reason=$reason elapsedSinceNavStopMs=$elapsed"
+        Log.e(TAG, lifecycleMsg)
+        com.remmi.browser.util.DebugLogManager.log(lifecycleMsg)
+        lastOriginalFailures[tabId] = failureType
+      }
       "ABOUT_BLANK" -> {
         if (isRecoveryInFlight) {
           val suppMsg = "[FORENSIC][POST_NAV_FAILURE_SUPPRESSED] tabId=$tabId navId=$navId successfulUrl=${record?.url ?: "none"} currentUrl=$curr gen=$gen elapsedSinceNavStopMs=$elapsed failure=ABOUT_BLANK reason=transient_recovery_blank"
@@ -1016,15 +1042,53 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val uri1 = parseUri(url1) ?: return false
     val uri2 = parseUri(url2) ?: return false
 
+    val host1 = uri1.host?.lowercase() ?: ""
+    val host2 = uri2.host?.lowercase() ?: ""
+    if (host1.isEmpty() || host2.isEmpty()) return false
+
+    val isOnion = host1.endsWith(".onion") || host2.endsWith(".onion")
+    if (isOnion) {
+      // For .onion hosts, HTTP and HTTPS MUST NOT be considered equivalent.
+      // Require exact scheme, host, effective port, path and query equality.
+      val scheme1 = uri1.scheme?.lowercase() ?: ""
+      val scheme2 = uri2.scheme?.lowercase() ?: ""
+      if (scheme1 != scheme2) return false
+      if (host1 != host2) return false
+
+      val effPort1 = if (uri1.port != -1) uri1.port else if (scheme1 == "http") 80 else if (scheme1 == "https") 443 else -1
+      val effPort2 = if (uri2.port != -1) uri2.port else if (scheme2 == "http") 80 else if (scheme2 == "https") 443 else -1
+      if (effPort1 != effPort2) return false
+
+      val path1 = (uri1.path ?: "").trimEnd('/')
+      val path2 = (uri2.path ?: "").trimEnd('/')
+      if (path1 != path2) return false
+
+      val query1 = uri1.query
+      val query2 = uri2.query
+      if (query1 != query2) {
+        if (query1.isNullOrEmpty() && query2.isNullOrEmpty()) {
+          // Both empty or null
+        } else {
+          if (query1 == null || query2 == null) return false
+          val names1 = try { uri1.queryParameterNames } catch (_: Exception) { null }
+          val names2 = try { uri2.queryParameterNames } catch (_: Exception) { null }
+          if (names1 == null || names2 == null || names1 != names2) return false
+          for (name in names1) {
+            val vals1 = uri1.getQueryParameters(name)
+            val vals2 = uri2.getQueryParameters(name)
+            if (vals1 != vals2) return false
+          }
+        }
+      }
+      return true
+    }
+
     val scheme1 = uri1.scheme?.lowercase() ?: ""
     val scheme2 = uri2.scheme?.lowercase() ?: ""
     val schemesCompatible = (scheme1 == scheme2) || 
       ((scheme1 == "http" || scheme1 == "https") && (scheme2 == "http" || scheme2 == "https"))
     if (!schemesCompatible) return false
 
-    val host1 = uri1.host?.lowercase() ?: ""
-    val host2 = uri2.host?.lowercase() ?: ""
-    if (host1.isEmpty() || host2.isEmpty()) return false
     val hostsCompatible = (host1 == host2) || 
       (host1 == host2.removePrefix("www.")) || 
       (host2 == host1.removePrefix("www."))
@@ -1799,6 +1863,19 @@ class GeckoEngineManager private constructor(private val context: Context) {
         } else if (url.isBlank() || isInternalOrIgnoredUrl(url)) {
           logNavAllocationRejected(tabId, navId, gen, url, "onLoadRequest", "internal_or_ignored")
         } else {
+          val origUrl = originalRequestedUrls[tabId] ?: ""
+          val origScheme = originalRequestedSchemes[tabId] ?: ""
+          if (origUrl.isNotBlank() && origScheme == "http" && url.startsWith("https://", ignoreCase = true) && url.contains(".onion", ignoreCase = true)) {
+            val origHost = parseUri(origUrl)?.host?.lowercase() ?: ""
+            val targetHost = parseUri(url)?.host?.lowercase() ?: ""
+            if (origHost.isNotEmpty() && origHost == targetHost) {
+              val reason = if (request.isRedirect) "SERVER_REDIRECT" else "SERVER_REDIRECT_OR_GECKO_UPGRADE"
+              val transLog = "[ONION_HTTPS_TRANSITION] original=$origUrl current=$url reason=$reason"
+              Log.i(TAG, transLog)
+              com.remmi.browser.util.DebugLogManager.log(transLog)
+            }
+          }
+
           val isInFlight = inFlightNavigations.containsKey(tabId)
           val inFlightUrl = inFlightUrls[tabId]
           val prevDispatched = lastDispatchedUrls[tabId]
@@ -2319,41 +2396,70 @@ class GeckoEngineManager private constructor(private val context: Context) {
 
         val targetUrl = uri ?: lastDispatchedUrls[tabId] ?: ""
         val isOnion = com.remmi.browser.security.NetworkRouteAuthority.isOnionDestination(targetUrl) || targetUrl.contains(".onion", ignoreCase = true)
+        val gen = navGenerations[tabId] ?: 0L
+        val navId = getActiveNavId(tabId)
 
-        // 1. Onion connection failure fallback (port 443 closed/unreachable):
-        // Tor onion hidden services are end-to-end encrypted and authenticated by Tor.
-        // If an onion service was loaded with https:// and port 443 is unreachable (connection refused, timeout, reset),
-        // automatically fall back to http:// (port 80) over Tor.
-        if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion) {
-          val isConnectionError = error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
-                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
-                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
-                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT ||
-                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_UNKNOWN_SOCKET_TYPE ||
-                                  error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_NETWORK
+        val origUrl = originalRequestedUrls[tabId] ?: ""
+        val origScheme = originalRequestedSchemes[tabId] ?: (parseUri(origUrl)?.scheme?.lowercase() ?: "")
+        val origUri = parseUri(origUrl)
+        val targetUri = parseUri(targetUrl)
+        val origHost = origUri?.host?.lowercase() ?: ""
+        val targetHost = targetUri?.host?.lowercase() ?: ""
 
-          if (isConnectionError && !onionFallbackAttempts.contains(targetUrl)) {
-            onionFallbackAttempts.add(targetUrl)
-            val fallbackHttpUrl = "http://" + targetUrl.substring(8)
-            Log.i(TAG, "[ONION_FALLBACK] Onion HTTPS port 443 unreachable (${error.code}); falling back to HTTP: $fallbackHttpUrl")
-            com.remmi.browser.util.DebugLogManager.log("[ONION_FALLBACK] tabId=$tabId url=$targetUrl -> $fallbackHttpUrl reason=port_443_unreachable")
-            mainHandler.post {
-              loadUrl(tabId, fallbackHttpUrl, forceReload = true)
-            }
-            return null
-          }
-        }
-
-        // 2. Certificate / SSL validation errors:
+        // 1. Certificate / SSL validation errors:
         // When an HTTPS site (especially .onion hidden services or self-signed certs) has a certificate error,
-        // delegate to Gecko's native about:certerror page so the user can inspect the certificate and click
-        // "Advanced -> Accept the Risk and Continue" (invoking document.addCertException() in the NSS database).
+        // classify as terminal certificate error and delegate to Gecko's native about:certerror page.
+        // If the user explicitly requested HTTP originally and was upgraded/redirected to HTTPS, perform at most 1 fallback to HTTP.
         val isSslOrCertError = error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_SECURITY ||
                                error.code == org.mozilla.geckoview.WebRequestError.ERROR_SECURITY_BAD_CERT ||
                                error.code == org.mozilla.geckoview.WebRequestError.ERROR_SECURITY_SSL ||
                                error.code == org.mozilla.geckoview.WebRequestError.ERROR_BAD_HSTS_CERT
 
         if (isSslOrCertError) {
+          val certErrorName = when (error.code) {
+            org.mozilla.geckoview.WebRequestError.ERROR_SECURITY_BAD_CERT -> "ERROR_SECURITY_BAD_CERT"
+            org.mozilla.geckoview.WebRequestError.ERROR_SECURITY_SSL -> "ERROR_SECURITY_SSL"
+            org.mozilla.geckoview.WebRequestError.ERROR_BAD_HSTS_CERT -> "ERROR_BAD_HSTS_CERT"
+            else -> "ERROR_SECURITY_BAD_CERT"
+          }
+          val certLog = "[CERT_ERROR]\nurl=$targetUrl\nerror=$certErrorName"
+          Log.w(TAG, certLog)
+          com.remmi.browser.util.DebugLogManager.log(certLog)
+
+          val isExplicitHttp = origScheme == "http" && origUrl.startsWith("http://", ignoreCase = true)
+          val isTargetHttps = targetUrl.startsWith("https://", ignoreCase = true)
+          val isSameOnionHost = origHost.isNotEmpty() && origHost == targetHost && origHost.endsWith(".onion")
+
+          val fallbackKey = "$tabId:$targetHost"
+          val attempts = onionHttpFallbackAttempts.getOrDefault(fallbackKey, 0)
+
+          if (isExplicitHttp && isTargetHttps && isSameOnionHost && attempts < 1) {
+            onionHttpFallbackAttempts[fallbackKey] = attempts + 1
+            val fallbackLog = "[ONION_HTTP_FALLBACK]\nfrom=$targetUrl\nto=$origUrl\nattempt=1"
+            Log.i(TAG, fallbackLog)
+            com.remmi.browser.util.DebugLogManager.log(fallbackLog)
+            mainHandler.post {
+              loadUrl(tabId, origUrl, forceReload = true)
+            }
+            return null
+          }
+
+          val termLog = "[CERT_ERROR_TERMINAL]\nnavId=$navId\ngeneration=$gen"
+          Log.w(TAG, termLog)
+          com.remmi.browser.util.DebugLogManager.log(termLog)
+
+          lastOriginalFailures[tabId] = "CERTIFICATE_ERROR"
+          checkPostNavFailure(tabId, "CERTIFICATE_ERROR", targetUrl)
+
+          // Stop automatic content-recovery retries for that navigation generation
+          val removedRecovery = activeRecoveries.remove(tabId)
+          removedRecovery?.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+          pendingContentRecoveries.remove(tabId)
+          lastRecoveredGenerations[tabId] = gen
+          if (removedRecovery != null) {
+            transitionRecoveryState(tabId, RecoveryState.FAILED, removedRecovery.navId, gen, "certificate_error_terminal")
+          }
+
           try {
             val encodedTarget = java.net.URLEncoder.encode(targetUrl, "UTF-8")
             val certErrorUri = "about:certerror?e=nssBadCert&u=$encodedTarget"
@@ -2362,6 +2468,35 @@ class GeckoEngineManager private constructor(private val context: Context) {
             return GeckoResult.fromValue(certErrorUri)
           } catch (e: Exception) {
             Log.e(TAG, "Failed to build cert error URI", e)
+          }
+        }
+
+        // 2. Onion connection failure fallback (port 443 closed/unreachable):
+        // Tor onion hidden services are end-to-end encrypted and authenticated by Tor.
+        // If an onion service was loaded with https:// and port 443 is unreachable (connection refused, timeout, reset),
+        // automatically fall back to http:// (port 80) over Tor ONLY IF original request was http://
+        if (targetUrl.startsWith("https://", ignoreCase = true) && isOnion) {
+          val isExplicitHttp = origScheme == "http" && origUrl.startsWith("http://", ignoreCase = true)
+          val isConnectionError = error.code == org.mozilla.geckoview.WebRequestError.ERROR_CONNECTION_REFUSED ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_TIMEOUT ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_RESET ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_NET_INTERRUPT ||
+                                  error.code == org.mozilla.geckoview.WebRequestError.ERROR_UNKNOWN_SOCKET_TYPE ||
+                                  error.category == org.mozilla.geckoview.WebRequestError.ERROR_CATEGORY_NETWORK
+
+          val fallbackKey = "$tabId:$targetHost"
+          val attempts = onionHttpFallbackAttempts.getOrDefault(fallbackKey, 0)
+
+          if (isExplicitHttp && isConnectionError && attempts < 1 && !onionFallbackAttempts.contains(targetUrl)) {
+            onionFallbackAttempts.add(targetUrl)
+            onionHttpFallbackAttempts[fallbackKey] = attempts + 1
+            val fallbackHttpUrl = if (origUrl.isNotBlank()) origUrl else ("http://" + targetUrl.substring(8))
+            Log.i(TAG, "[ONION_FALLBACK] Onion HTTPS port 443 unreachable (${error.code}); falling back to HTTP: $fallbackHttpUrl")
+            com.remmi.browser.util.DebugLogManager.log("[ONION_FALLBACK] tabId=$tabId url=$targetUrl -> $fallbackHttpUrl reason=port_443_unreachable")
+            mainHandler.post {
+              loadUrl(tabId, fallbackHttpUrl, forceReload = true)
+            }
+            return null
           }
         }
 
@@ -2545,7 +2680,9 @@ class GeckoEngineManager private constructor(private val context: Context) {
         }
 
         if (!success) {
-          checkPostNavFailure(tabId, "PAGE_STOP_FAILED", currUrl)
+          if (lastOriginalFailures[tabId] != "CERTIFICATE_ERROR") {
+            checkPostNavFailure(tabId, "PAGE_STOP_FAILED", currUrl)
+          }
         } else {
           val currentSettings = com.remmi.browser.storage.SettingsRepository.getInstance(context).settings.value
           if (currentSettings.darkThemeForAllWebPages && !isInternalOrIgnoredUrl(currUrl)) {
@@ -2975,6 +3112,13 @@ class GeckoEngineManager private constructor(private val context: Context) {
     val currentActive = activeSessions[tabId]
     if (currentActive == null || currentActive !== session) {
       val suppMsg = "[FORENSIC][CONTENT_RECOVERY_SUPPRESSED] tabId=$tabId session=$sessId view=$viewId url=$currUrl gen=$gen reason=stale_or_inactive_session elapsedRealtime=$now"
+      Log.w(TAG, suppMsg)
+      com.remmi.browser.util.DebugLogManager.log(suppMsg)
+      return
+    }
+
+    if (lastOriginalFailures[tabId] == "CERTIFICATE_ERROR") {
+      val suppMsg = "[FORENSIC][CONTENT_RECOVERY_SUPPRESSED] tabId=$tabId session=$sessId view=$viewId url=$currUrl gen=$gen reason=certificate_error_terminal elapsedRealtime=$now"
       Log.w(TAG, suppMsg)
       com.remmi.browser.util.DebugLogManager.log(suppMsg)
       return

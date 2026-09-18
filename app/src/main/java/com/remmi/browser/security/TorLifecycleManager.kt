@@ -59,6 +59,10 @@ class TorLifecycleManager private constructor(private val context: Context) {
   private val _isTorReady = MutableStateFlow(false)
   val isTorReady: StateFlow<Boolean> = _isTorReady.asStateFlow()
 
+  fun setTorReadyForTesting(ready: Boolean) {
+    _isTorReady.value = ready
+  }
+
   private val _bootstrapProgress = MutableStateFlow(0)
   val bootstrapProgress: StateFlow<Int> = _bootstrapProgress.asStateFlow()
 

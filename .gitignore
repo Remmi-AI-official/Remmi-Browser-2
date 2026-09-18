@@ -19,6 +19,13 @@ debug.keystore
 *.jks
 *.keystore
 release-keystore.jks
+release-keystore.base64
+*-keystore.base64
+*.p12
+*.key
+*.pem
+release_dist/
+release-signing.properties
 *.patch
 APK_SIZE_REPORT.txt
 *.hprof

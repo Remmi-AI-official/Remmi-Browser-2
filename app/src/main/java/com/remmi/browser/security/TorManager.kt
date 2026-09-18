@@ -264,7 +264,7 @@ class TorManager(private val context: Context) {
           val f = org.torproject.jni.TorService::class.java.getDeclaredField("socksPort")
           f.isAccessible = true
           f.getInt(null)
-      } catch (e: Exception) { -1 }
+      } catch (e: Throwable) { -1 }
       if (servicePort in 1024..65535 && TorStatusChecker.isPortListening("127.0.0.1", servicePort, 200)) {
         if (TorStatusChecker.verifySocks5Handshake("127.0.0.1", servicePort, 400)) {
           return servicePort

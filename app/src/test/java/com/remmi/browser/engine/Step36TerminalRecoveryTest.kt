@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 import com.remmi.browser.util.DebugLogManager
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [34])
 class Step36TerminalRecoveryTest {
 
     private lateinit var context: Application

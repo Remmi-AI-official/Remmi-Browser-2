@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [34])
 class PaintTelemetryGuardTest {
   private lateinit var manager: GeckoEngineManager
   private lateinit var tabManager: TabManager

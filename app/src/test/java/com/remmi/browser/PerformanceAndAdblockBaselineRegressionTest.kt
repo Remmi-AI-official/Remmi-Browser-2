@@ -29,7 +29,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [34])
 class PerformanceAndAdblockBaselineRegressionTest {
 
   private lateinit var context: Context

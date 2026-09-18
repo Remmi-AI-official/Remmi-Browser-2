@@ -911,6 +911,7 @@ class AdblockBridge {
 
           fun parseToFallback(rules: String, isAdditional: Boolean) {
             if (rules.isBlank()) return
+            if (isNativeLoaded) return
             rules.lines().forEach { line ->
               val trimmed = line.trim()
               if (trimmed.isNotEmpty() && !trimmed.startsWith("!")) {

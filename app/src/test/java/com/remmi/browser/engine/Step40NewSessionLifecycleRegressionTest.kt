@@ -24,7 +24,7 @@ import org.robolectric.annotation.Config
 import org.mozilla.geckoview.WebResponse
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [34])
 class Step40NewSessionLifecycleRegressionTest {
   private lateinit var manager: GeckoEngineManager
   private lateinit var tabManager: TabManager
@@ -89,7 +89,16 @@ class Step40NewSessionLifecycleRegressionTest {
     
     assertNotNull(result)
     
-    val newSession = result!!.poll(1000)
+    var newSession: GeckoSession? = null
+    result!!.then { res ->
+      newSession = res
+      org.mozilla.geckoview.GeckoResult.fromValue(res)
+    }
+    for (i in 0 until 50) {
+      if (newSession != null) break
+      kotlinx.coroutines.delay(20)
+      try { org.robolectric.shadows.ShadowLooper.idleMainLooper() } catch (_: Throwable) {}
+    }
     assertNotNull("Should return a new session", newSession)
     println("FORENSIC LOGS:\n" + DebugLogManager.getCurrentSessionEvents().joinToString("\n"))
     assertFalse("Returned session MUST BE UNOPENED", newSession!!.isOpen)
