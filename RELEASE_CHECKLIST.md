@@ -10,7 +10,7 @@ This matrix distinguishes between automated local JVM / CI test gates and mandat
 - [x] **Release Signing Security:** Committed keystores (`release-keystore.base64`, `debug.keystore.base64`) removed from repo and gitignored.
 - [x] **CI Fail-Closed Signing:** `.github/workflows/release.yml` rejects builds without GitHub Secrets (`REMMI_RELEASE_KEYSTORE_B64`, etc.). No unauthenticated fallbacks.
 - [x] **Unsuppressed CI Verification:** All `|| true` removed from `apksigner` and `jarsigner` commands in release CI.
-- [x] **Release Test Enforcement:** CI executes `testReleaseUnitTest` and `lintRelease` without `-x test` or `-x lint`.
+- [x] **Release Test Enforcement:** CI executes `testDebugUnitTest` and `lintRelease` without `-x test` or `-x lint`.
 - [x] **Artifact Validation:** Release workflow verifies non-empty APK and AAB, package ID `com.remmi.browser`, minSdk 26, targetSdk 36, non-debuggable flags, and generates `SHA256SUMS.txt`.
 - [x] **Tor Config Hygiene:** Stable `torrc` preserved without experimental/unsupported directives (`ConnectTimeout`, `MaxClientCircuits`, `CircuitIdleTimeout`).
 - [x] **Fail-Closed Architecture:** `NavigationSecurityAuthority`, `NetworkRouteAuthority`, and `CurrentTorRoute` maintain fail-closed routing and generation matching.

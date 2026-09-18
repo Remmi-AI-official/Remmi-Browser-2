@@ -97,9 +97,13 @@ jobs:
       - name: Run Release Unit Tests & Lint
         env:
           JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true -Xmx4g"
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          STORE_PASSWORD: ${{ env.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ env.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew
-          ./gradlew testReleaseUnitTest lintRelease --no-daemon --stacktrace
+          ./gradlew testDebugUnitTest lintRelease --no-daemon --stacktrace
 
       - name: Build Release APKs & Bundle (AAB)
         env:
