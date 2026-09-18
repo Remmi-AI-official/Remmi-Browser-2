@@ -167,7 +167,7 @@ jobs:
                 echo "Validating metadata for $apk..."
                 "$AAPT2" dump badging "$apk" > "${apk}_badging.txt"
                 grep -q "package: name='com.remmi.browser'" "${apk}_badging.txt" || { echo "::error::Package name is not com.remmi.browser in $apk"; exit 1; }
-                grep -q "sdkVersion:'26'" "${apk}_badging.txt" || { echo "::error::Unexpected minSdk in $apk (expected 26)"; exit 1; }
+                grep -E -q "(minSdkVersion|sdkVersion):'26'" "${apk}_badging.txt" || { echo "::error::Unexpected minSdk in $apk (expected 26)"; exit 1; }
                 grep -q "targetSdkVersion:'36'" "${apk}_badging.txt" || { echo "::error::Unexpected targetSdk in $apk (expected 36)"; exit 1; }
                 if grep -q "application-debuggable" "${apk}_badging.txt"; then
                   echo "::error::$apk contains application-debuggable! Release builds must NOT be debuggable."
